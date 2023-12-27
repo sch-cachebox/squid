@@ -1,0 +1,332 @@
+signal.o: signal.cc ../../include/squid.h ../../include/autoconf.h \
+  ../../include/version.h ../../compat/compat.h ../../compat/osdetect.h \
+  ../../compat/fdsetsize.h /usr/include/osreldate.h ../../compat/types.h \
+  /usr/include/sys/types.h /usr/include/sys/cdefs.h \
+  /usr/include/machine/endian.h /usr/include/x86/endian.h \
+  /usr/include/sys/_types.h /usr/include/machine/_types.h \
+  /usr/include/x86/_types.h /usr/include/machine/_limits.h \
+  /usr/include/x86/_limits.h /usr/include/sys/_pthreadtypes.h \
+  /usr/include/sys/_stdint.h /usr/include/sys/select.h \
+  /usr/include/sys/_sigset.h /usr/include/sys/_timeval.h \
+  /usr/include/sys/timespec.h /usr/include/sys/_timespec.h \
+  /usr/include/c++/v1/stdlib.h /usr/include/c++/v1/__config \
+  /usr/include/sys/endian.h /usr/include/pthread.h /usr/include/stdlib.h \
+  /usr/include/sys/_null.h /usr/include/c++/v1/math.h \
+  /usr/include/math.h /usr/include/c++/v1/type_traits \
+  /usr/include/c++/v1/cstddef /usr/include/c++/v1/version \
+  /usr/include/stddef.h /usr/include/c++/v1/__nullptr \
+  /usr/include/c++/v1/limits /usr/include/c++/v1/__undef_macros \
+  /usr/include/c++/v1/stddef.h /usr/include/c++/v1/inttypes.h \
+  /usr/include/inttypes.h /usr/include/machine/_inttypes.h \
+  /usr/include/x86/_inttypes.h /usr/include/sys/stdint.h \
+  /usr/include/machine/_stdint.h /usr/include/x86/_stdint.h \
+  /usr/include/c++/v1/stdint.h /usr/include/stdint.h \
+  /usr/include/netinet/in_systm.h /usr/include/c++/v1/cstdint \
+  ../../compat/os/aix.h ../../compat/os/android.h \
+  ../../compat/os/dragonfly.h ../../compat/os/freebsd.h \
+  ../../compat/os/hpux.h ../../compat/os/linux.h \
+  ../../compat/os/macosx.h ../../compat/os/mswindows.h \
+  ../../compat/os/netbsd.h ../../compat/os/next.h \
+  ../../compat/os/openbsd.h ../../compat/os/os2.h ../../compat/os/qnx.h \
+  ../../compat/os/sgi.h ../../compat/os/solaris.h \
+  ../../compat/os/sunos.h ../../compat/assert.h \
+  ../../compat/compat_shared.h /usr/include/sys/time.h \
+  /usr/include/time.h /usr/include/xlocale/_time.h \
+  /usr/include/sys/resource.h /usr/include/dirent.h \
+  /usr/include/sys/dirent.h /usr/include/fcntl.h \
+  /usr/include/c++/v1/csignal /usr/include/signal.h \
+  /usr/include/sys/signal.h /usr/include/machine/signal.h \
+  /usr/include/x86/signal.h /usr/include/machine/trap.h \
+  /usr/include/x86/trap.h /usr/include/machine/ucontext.h \
+  /usr/include/x86/ucontext.h /usr/include/sys/_ucontext.h \
+  /usr/include/com_err.h /usr/include/com_right.h /usr/include/stdarg.h \
+  /usr/include/x86/stdarg.h ../../compat/xalloc.h ../../compat/xis.h \
+  /usr/include/c++/v1/ctype.h /usr/include/ctype.h /usr/include/_ctype.h \
+  /usr/include/runetype.h /usr/include/xlocale/_ctype.h \
+  ../../compat/xstrerror.h /usr/include/c++/v1/errno.h \
+  /usr/include/errno.h ../../compat/xstring.h \
+  /usr/include/c++/v1/string.h /usr/include/string.h \
+  /usr/include/strings.h /usr/include/xlocale/_strings.h \
+  /usr/include/xlocale/_string.h ../../compat/xstrto.h \
+  ../../compat/strtoll.h ../../compat/memrchr.h \
+  ../../compat/getaddrinfo.h ../../compat/getnameinfo.h \
+  ../../compat/inet_ntop.h ../../compat/inet_pton.h \
+  ../../compat/stdvarargs.h /usr/include/c++/v1/cstdarg \
+  /usr/include/syslog.h ../../compat/stdio.h /usr/include/c++/v1/stdio.h \
+  /usr/include/stdio.h /usr/include/c++/v1/cstdio ../../compat/statvfs.h \
+  /usr/include/sys/statvfs.h ../../compat/debug.h /usr/include/unistd.h \
+  /usr/include/sys/unistd.h ../../compat/valgrind.h \
+  ../../compat/GnuRegex.h /usr/include/regex.h ../../compat/cppunit.h \
+  ../../include/leakcheck.h signal.hh /usr/include/c++/v1/cerrno \
+  /usr/include/c++/v1/cstring /usr/include/memory.h \
+  /usr/include/sys/wait.h
+
+../../include/squid.h:
+
+../../include/autoconf.h:
+
+../../include/version.h:
+
+../../compat/compat.h:
+
+../../compat/osdetect.h:
+
+../../compat/fdsetsize.h:
+
+/usr/include/osreldate.h:
+
+../../compat/types.h:
+
+/usr/include/sys/types.h:
+
+/usr/include/sys/cdefs.h:
+
+/usr/include/machine/endian.h:
+
+/usr/include/x86/endian.h:
+
+/usr/include/sys/_types.h:
+
+/usr/include/machine/_types.h:
+
+/usr/include/x86/_types.h:
+
+/usr/include/machine/_limits.h:
+
+/usr/include/x86/_limits.h:
+
+/usr/include/sys/_pthreadtypes.h:
+
+/usr/include/sys/_stdint.h:
+
+/usr/include/sys/select.h:
+
+/usr/include/sys/_sigset.h:
+
+/usr/include/sys/_timeval.h:
+
+/usr/include/sys/timespec.h:
+
+/usr/include/sys/_timespec.h:
+
+/usr/include/c++/v1/stdlib.h:
+
+/usr/include/c++/v1/__config:
+
+/usr/include/sys/endian.h:
+
+/usr/include/pthread.h:
+
+/usr/include/stdlib.h:
+
+/usr/include/sys/_null.h:
+
+/usr/include/c++/v1/math.h:
+
+/usr/include/math.h:
+
+/usr/include/c++/v1/type_traits:
+
+/usr/include/c++/v1/cstddef:
+
+/usr/include/c++/v1/version:
+
+/usr/include/stddef.h:
+
+/usr/include/c++/v1/__nullptr:
+
+/usr/include/c++/v1/limits:
+
+/usr/include/c++/v1/__undef_macros:
+
+/usr/include/c++/v1/stddef.h:
+
+/usr/include/c++/v1/inttypes.h:
+
+/usr/include/inttypes.h:
+
+/usr/include/machine/_inttypes.h:
+
+/usr/include/x86/_inttypes.h:
+
+/usr/include/sys/stdint.h:
+
+/usr/include/machine/_stdint.h:
+
+/usr/include/x86/_stdint.h:
+
+/usr/include/c++/v1/stdint.h:
+
+/usr/include/stdint.h:
+
+/usr/include/netinet/in_systm.h:
+
+/usr/include/c++/v1/cstdint:
+
+../../compat/os/aix.h:
+
+../../compat/os/android.h:
+
+../../compat/os/dragonfly.h:
+
+../../compat/os/freebsd.h:
+
+../../compat/os/hpux.h:
+
+../../compat/os/linux.h:
+
+../../compat/os/macosx.h:
+
+../../compat/os/mswindows.h:
+
+../../compat/os/netbsd.h:
+
+../../compat/os/next.h:
+
+../../compat/os/openbsd.h:
+
+../../compat/os/os2.h:
+
+../../compat/os/qnx.h:
+
+../../compat/os/sgi.h:
+
+../../compat/os/solaris.h:
+
+../../compat/os/sunos.h:
+
+../../compat/assert.h:
+
+../../compat/compat_shared.h:
+
+/usr/include/sys/time.h:
+
+/usr/include/time.h:
+
+/usr/include/xlocale/_time.h:
+
+/usr/include/sys/resource.h:
+
+/usr/include/dirent.h:
+
+/usr/include/sys/dirent.h:
+
+/usr/include/fcntl.h:
+
+/usr/include/c++/v1/csignal:
+
+/usr/include/signal.h:
+
+/usr/include/sys/signal.h:
+
+/usr/include/machine/signal.h:
+
+/usr/include/x86/signal.h:
+
+/usr/include/machine/trap.h:
+
+/usr/include/x86/trap.h:
+
+/usr/include/machine/ucontext.h:
+
+/usr/include/x86/ucontext.h:
+
+/usr/include/sys/_ucontext.h:
+
+/usr/include/com_err.h:
+
+/usr/include/com_right.h:
+
+/usr/include/stdarg.h:
+
+/usr/include/x86/stdarg.h:
+
+../../compat/xalloc.h:
+
+../../compat/xis.h:
+
+/usr/include/c++/v1/ctype.h:
+
+/usr/include/ctype.h:
+
+/usr/include/_ctype.h:
+
+/usr/include/runetype.h:
+
+/usr/include/xlocale/_ctype.h:
+
+../../compat/xstrerror.h:
+
+/usr/include/c++/v1/errno.h:
+
+/usr/include/errno.h:
+
+../../compat/xstring.h:
+
+/usr/include/c++/v1/string.h:
+
+/usr/include/string.h:
+
+/usr/include/strings.h:
+
+/usr/include/xlocale/_strings.h:
+
+/usr/include/xlocale/_string.h:
+
+../../compat/xstrto.h:
+
+../../compat/strtoll.h:
+
+../../compat/memrchr.h:
+
+../../compat/getaddrinfo.h:
+
+../../compat/getnameinfo.h:
+
+../../compat/inet_ntop.h:
+
+../../compat/inet_pton.h:
+
+../../compat/stdvarargs.h:
+
+/usr/include/c++/v1/cstdarg:
+
+/usr/include/syslog.h:
+
+../../compat/stdio.h:
+
+/usr/include/c++/v1/stdio.h:
+
+/usr/include/stdio.h:
+
+/usr/include/c++/v1/cstdio:
+
+../../compat/statvfs.h:
+
+/usr/include/sys/statvfs.h:
+
+../../compat/debug.h:
+
+/usr/include/unistd.h:
+
+/usr/include/sys/unistd.h:
+
+../../compat/valgrind.h:
+
+../../compat/GnuRegex.h:
+
+/usr/include/regex.h:
+
+../../compat/cppunit.h:
+
+../../include/leakcheck.h:
+
+signal.hh:
+
+/usr/include/c++/v1/cerrno:
+
+/usr/include/c++/v1/cstring:
+
+/usr/include/memory.h:
+
+/usr/include/sys/wait.h:
