@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_LOOKUPTABLE_H_
-#define SQUID_LOOKUPTABLE_H_
+#ifndef SQUID_SRC_BASE_LOOKUPTABLE_H
+#define SQUID_SRC_BASE_LOOKUPTABLE_H
 
 #include "sbuf/Algorithms.h"
 #include "sbuf/SBuf.h"
@@ -47,13 +47,6 @@ struct LookupTableRecord
  *
  */
 
-class SBufCaseInsensitiveLess : public std::binary_function<SBuf, SBuf, bool> {
-public:
-    bool operator() (const SBuf &x, const SBuf &y) const {
-        return x.caseCmp(y) < 0;
-    }
-};
-
 template<typename EnumType, typename RecordType = LookupTableRecord<EnumType>, typename Hasher = CaseInsensitiveSBufHash >
 class LookupTable
 {
@@ -77,10 +70,10 @@ public:
     }
 
 private:
-    typedef std::unordered_map<const SBuf, EnumType, Hasher> lookupTable_t;
+    using lookupTable_t = std::unordered_map<const SBuf, EnumType, Hasher, CaseInsensitiveSBufEqual>;
     lookupTable_t lookupTable;
     EnumType invalidValue;
 };
 
-#endif /* SQUID_LOOKUPTABLE_H_ */
+#endif /* SQUID_SRC_BASE_LOOKUPTABLE_H */
 

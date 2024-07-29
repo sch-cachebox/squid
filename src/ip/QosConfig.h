@@ -1,17 +1,21 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_QOSCONFIG_H
-#define SQUID_QOSCONFIG_H
+#ifndef SQUID_SRC_IP_QOSCONFIG_H
+#define SQUID_SRC_IP_QOSCONFIG_H
 
 #include "acl/forward.h"
+#include "cbdata.h"
+#include "comm/forward.h"
 #include "hier_code.h"
 #include "ip/forward.h"
+#include "ip/NfMarkConfig.h"
+#include "store/forward.h"
 
 #if HAVE_LIBNETFILTER_CONNTRACK_LIBNETFILTER_CONNTRACK_H
 #include <libnetfilter_conntrack/libnetfilter_conntrack.h>
@@ -19,17 +23,18 @@
 #if HAVE_LIBNETFILTER_CONNTRACK_LIBNETFILTER_CONNTRACK_TCP_H
 #include <libnetfilter_conntrack/libnetfilter_conntrack_tcp.h>
 #endif
+#include <iosfwd>
 #include <limits>
 
 class fde;
 
-// TODO: move to new ACL framework
+// TODO: move to new Acl::Node framework
 class acl_tos
 {
     CBDATA_CLASS(acl_tos);
 
 public:
-    acl_tos() : next(NULL), aclList(NULL), tos(0) {}
+    acl_tos() : next(nullptr), aclList(nullptr), tos(0) {}
     ~acl_tos();
 
     acl_tos *next;
@@ -37,18 +42,18 @@ public:
     tos_t tos;
 };
 
-// TODO: move to new ACL framework
+// TODO: move to new Acl::Node framework
 class acl_nfmark
 {
     CBDATA_CLASS(acl_nfmark);
 
 public:
-    acl_nfmark() : next(NULL), aclList(NULL), nfmark(0) {}
+    acl_nfmark() : next(nullptr), aclList(nullptr) {}
     ~acl_nfmark();
 
     acl_nfmark *next;
     ACLList *aclList;
-    nfmark_t nfmark;
+    Ip::NfMarkConfig markConfig;
 };
 
 namespace Ip
@@ -77,27 +82,24 @@ enum ConnectionDirection {
 void getTosFromServer(const Comm::ConnectionPointer &server, fde *clientFde);
 
 /**
-* Function to retrieve the netfilter mark value of the connection.
+* Function to retrieve the netfilter CONNMARK value of the connection.
 * Called by FwdState::dispatch if QOS options are enabled or by
 * Comm::TcpAcceptor::acceptOne
 *
 * @param conn    Pointer to connection to get mark for
 * @param connDir Specifies connection type (incoming or outgoing)
 */
-nfmark_t getNfmarkFromConnection(const Comm::ConnectionPointer &conn, const ConnectionDirection connDir);
+nfmark_t getNfConnmark(const Comm::ConnectionPointer &conn, const ConnectionDirection connDir);
 
-#if USE_LIBNETFILTERCONNTRACK
 /**
-* Callback function to mark connection once it's been found.
-* This function is called by the libnetfilter_conntrack
-* libraries, during nfct_query in Ip::Qos::getNfmarkFromServer.
-* nfct_callback_register is used to register this function.
-* @param nf_conntrack_msg_type Type of conntrack message
-* @param nf_conntrack Pointer to the conntrack structure
-* @param mark Pointer to nfmark_t mark
+* Function to set the netfilter CONNMARK value on the connection.
+* Called by ClientHttpRequest::doCallouts.
+*
+* @param conn    Pointer to connection to set mark on
+* @param connDir Specifies connection type (incoming or outgoing)
+* @cm            Netfilter mark configuration (mark and mask)
 */
-int getNfmarkCallback(enum nf_conntrack_msg_type type, struct nf_conntrack *ct, void *mark);
-#endif
+bool setNfConnmark(Comm::ConnectionPointer &conn, const ConnectionDirection connDir, const NfMarkConfig &cm);
 
 /**
 * Function to work out and then apply to the socket the appropriate
@@ -142,7 +144,7 @@ int doNfmarkLocalHit(const Comm::ConnectionPointer &conn);
 * which then gets copied to the packets.
 * @param conn Descriptor of socket to set the TOS for
 */
-_SQUID_INLINE_ int setSockTos(const Comm::ConnectionPointer &conn, tos_t tos);
+int setSockTos(const Comm::ConnectionPointer &conn, tos_t tos);
 
 /**
 * The low level variant of setSockTos function to set TOS value of packets.
@@ -150,14 +152,14 @@ _SQUID_INLINE_ int setSockTos(const Comm::ConnectionPointer &conn, tos_t tos);
 * @param fd Descriptor of socket to set the TOS for
 * @param type The socket family, AF_INET or AF_INET6
 */
-_SQUID_INLINE_ int setSockTos(const int fd, tos_t tos, int type);
+int setSockTos(const int fd, tos_t tos, int type);
 
 /**
 * Function to set the netfilter mark value of packets. Sets the value on the
 * socket which then gets copied to the packets. Called from Ip::Qos::doNfmarkLocalMiss
 * @param conn Descriptor of socket to set the mark for
 */
-_SQUID_INLINE_ int setSockNfmark(const Comm::ConnectionPointer &conn, nfmark_t mark);
+int setSockNfmark(const Comm::ConnectionPointer &conn, nfmark_t mark);
 
 /**
 * The low level variant of setSockNfmark function to set the netfilter mark
@@ -165,7 +167,7 @@ _SQUID_INLINE_ int setSockNfmark(const Comm::ConnectionPointer &conn, nfmark_t m
 * Avoid if you can use the Connection-based setSockNfmark().
 * @param fd Descriptor of socket to set the mark for
 */
-_SQUID_INLINE_ int setSockNfmark(const int fd, nfmark_t mark);
+int setSockNfmark(const int fd, nfmark_t mark);
 
 /**
  * QOS configuration class. Contains all the parameters for QOS functions as well
@@ -187,13 +189,17 @@ public:
      * objects are part of the dump function must be self-contained.
      * which means no StoreEntry references. Just a basic char* buffer.
      */
-    void dumpConfigLine(char *entry, const char *name) const;
+    void dumpConfigLine(std::ostream &, const char *) const;
 
     /// Whether we should modify TOS flags based on cache hits and misses.
-    _SQUID_INLINE_ bool isHitTosActive() const;
+    bool isHitTosActive() const {
+        return (tosLocalHit || tosSiblingHit || tosParentHit || tosMiss || preserveMissTos);
+    }
 
     /// Whether we should modify netfilter marks based on cache hits and misses.
-    _SQUID_INLINE_ bool isHitNfmarkActive() const;
+    bool isHitNfmarkActive() const {
+        return (markLocalHit || markSiblingHit || markParentHit || markMiss || preserveMissMark);
+    }
 
     /**
     * Iterates through any outgoing_nfmark or clientside_nfmark configuration parameters
@@ -201,13 +207,13 @@ public:
     * This function is used on initialisation to define capabilities required (Netfilter
     * marking requires CAP_NET_ADMIN).
     */
-    _SQUID_INLINE_ bool isAclNfmarkActive() const;
+    bool isAclNfmarkActive() const;
 
     /**
     * Iterates through any outgoing_tos or clientside_tos configuration parameters
     * to find out if packets should be marked with TOS flags.
     */
-    _SQUID_INLINE_ bool isAclTosActive() const;
+    bool isAclTosActive() const;
 
     tos_t tosLocalHit;                  ///< TOS value to apply to local cache hits
     tos_t tosSiblingHit;                ///< TOS value to apply to hits from siblings
@@ -229,28 +235,21 @@ public:
     acl_tos *tosToClient;               ///< The TOS that packets to the client should be marked with, based on ACL
     acl_nfmark *nfmarkToServer;         ///< The MARK that packets to the web server should be marked with, based on ACL
     acl_nfmark *nfmarkToClient;         ///< The MARK that packets to the client should be marked with, based on ACL
+    acl_nfmark *nfConnmarkToClient = nullptr;    ///< The CONNMARK that the client connection should be marked with, based on ACL
 
 };
 
 /// Globally available instance of Qos::Config
 extern Config TheConfig;
 
-/* legacy parser access wrappers */
-#define parse_QosConfig(X)  (X)->parseConfigLine()
-#define free_QosConfig(X)
-#define dump_QosConfig(e,n,X) do { \
-        char temp[256]; /* random number. change as needed. max config line length. */ \
-        (X).dumpConfigLine(temp,n); \
-            storeAppendPrintf(e, "%s", temp); \
-    } while(0);
-
 } // namespace Qos
 
 } // namespace Ip
 
-#if _USE_INLINE_
-#include "Qos.cci"
-#endif
+/* legacy parser access wrappers */
+inline void parse_QosConfig(Ip::Qos::Config * c) { c->parseConfigLine(); }
+inline void free_QosConfig(Ip::Qos::Config *) {}
+void dump_QosConfig(StoreEntry *, const char * directiveName, const Ip::Qos::Config &);
 
-#endif /* SQUID_QOSCONFIG_H */
+#endif /* SQUID_SRC_IP_QOSCONFIG_H */
 

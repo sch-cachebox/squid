@@ -1,16 +1,16 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_SECURITY_ENCRYPTORANSWER_H
-#define SQUID_SECURITY_ENCRYPTORANSWER_H
+#ifndef SQUID_SRC_SECURITY_ENCRYPTORANSWER_H
+#define SQUID_SRC_SECURITY_ENCRYPTORANSWER_H
 
 #include "base/CbcPointer.h"
-#include "comm/forward.h"
+#include "comm/Connection.h"
 
 class ErrorState;
 
@@ -25,7 +25,7 @@ public:
     ~EncryptorAnswer(); ///< deletes error if it is still set
     Comm::ConnectionPointer conn; ///< peer connection (secured on success)
 
-    /// answer recepients must clear the error member in order to keep its info
+    /// answer recipients must clear the error member in order to keep its info
     /// XXX: We should refcount ErrorState instead of cbdata-protecting it.
     CbcPointer<ErrorState> error; ///< problem details (nil on success)
 
@@ -33,9 +33,9 @@ public:
     bool tunneled;
 };
 
-std::ostream &operator <<(std::ostream &, const Security::EncryptorAnswer &);
+std::ostream &operator <<(std::ostream &, const EncryptorAnswer &);
 
-} // namepace Security
+} // namespace Security
 
-#endif /* SQUID_SECURITY_ENCRYPTORANSWER_H */
+#endif /* SQUID_SRC_SECURITY_ENCRYPTORANSWER_H */
 

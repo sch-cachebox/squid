@@ -1,41 +1,33 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_ACLATSTEPDATA_H
-#define SQUID_ACLATSTEPDATA_H
-
-#if USE_OPENSSL
+#ifndef SQUID_SRC_ACL_ATSTEPDATA_H
+#define SQUID_SRC_ACL_ATSTEPDATA_H
 
 #include "acl/Acl.h"
 #include "acl/Data.h"
-#include "ssl/support.h"
-
+#include "XactionStep.h"
 #include <list>
 
-class ACLAtStepData : public ACLData<Ssl::BumpStep>
+class ACLAtStepData : public ACLData<XactionStep>
 {
     MEMPROXY_CLASS(ACLAtStepData);
 
 public:
     ACLAtStepData();
-    ACLAtStepData(ACLAtStepData const &);
-    ACLAtStepData &operator= (ACLAtStepData const &);
-    virtual ~ACLAtStepData();
-    bool match(Ssl::BumpStep);
-    virtual SBufList dump() const;
-    void parse();
-    bool empty() const;
-    virtual ACLAtStepData *clone() const;
+    ~ACLAtStepData() override;
+    bool match(XactionStep) override;
+    SBufList dump() const override;
+    void parse() override;
+    bool empty() const override;
 
-    std::list<Ssl::BumpStep> values;
+    std::list<XactionStep> values;
 };
 
-#endif /* USE_OPENSSL */
-
-#endif /* SQUID_ACLSSL_ERRORDATA_H */
+#endif /* SQUID_SRC_ACL_ATSTEPDATA_H */
 

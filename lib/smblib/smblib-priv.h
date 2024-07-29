@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -30,8 +30,8 @@
    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
-#ifndef _SMBLIB_PRIV_H_
-#define _SMBLIB_PRIV_H_
+#ifndef SQUID_LIB_SMBLIB_SMBLIB_PRIV_H
+#define SQUID_LIB_SMBLIB_SMBLIB_PRIV_H
 
 #include "smblib/smblib-common.h"
 #include "smblib/std-defines.h"
@@ -299,7 +299,7 @@ typedef unsigned char UCHAR;
 #define SMB_openx_mod_offset    39        /* mode to open with       */
 #define SMB_openx_atr_offset    41        /* search attributes       */
 #define SMB_openx_fat_offset    43        /* File attributes         */
-#define SMB_openx_tim_offset    45        /* time and date of creat  */
+#define SMB_openx_tim_offset    45        /* time and date of create  */
 #define SMB_openx_ofn_offset    49        /* Open function           */
 #define SMB_openx_als_offset    51        /* Space to allocate on    */
 #define SMB_openx_res_offset    55        /* reserved                */
@@ -551,5 +551,5 @@ extern int SMBlib_SMB_Error;          /* last Error             */
 
 void SMB_Get_My_Name(char *name, int len);
 
-#endif /* _SMBLIB_PRIV_H_ */
+#endif /* SQUID_LIB_SMBLIB_SMBLIB_PRIV_H */
 

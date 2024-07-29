@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -23,10 +23,11 @@
 #include "http/Stream.h"
 #include "HttpHdrContRange.h"
 #include "HttpHeader.h"
-#include "HttpHeaderFieldInfo.h"
 #include "HttpHeaderTools.h"
 #include "HttpRequest.h"
 #include "MemBuf.h"
+#include "sbuf/Stream.h"
+#include "sbuf/StringConvert.h"
 #include "SquidConfig.h"
 #include "Store.h"
 #include "StrList.h"
@@ -87,7 +88,7 @@ httpHeaderAddContRange(HttpHeader * hdr, HttpHdrRangeSpec spec, int64_t ent_len)
  * \note if no Connection header exists we may check the Proxy-Connection header
  */
 bool
-httpHeaderHasConnDir(const HttpHeader * hdr, const char *directive)
+httpHeaderHasConnDir(const HttpHeader * hdr, const SBuf &directive)
 {
     String list;
 
@@ -115,7 +116,7 @@ getStringPrefix(const char *str, size_t sz)
 }
 
 /**
- * parses an int field, complains if soemthing went wrong, returns true on
+ * parses an int field, complains if something went wrong, returns true on
  * success
  */
 int
@@ -169,7 +170,7 @@ httpHeaderParseQuotedString(const char *start, const int len, String *val)
     const char *end, *pos;
     val->clean();
     if (*start != '"') {
-        debugs(66, 2, HERE << "failed to parse a quoted-string header field near '" << start << "'");
+        debugs(66, 2, "failed to parse a quoted-string header field near '" << start << "'");
         return 0;
     }
     pos = start + 1;
@@ -179,7 +180,7 @@ httpHeaderParseQuotedString(const char *start, const int len, String *val)
         if (*pos =='\r') {
             ++pos;
             if ((pos-start) > len || *pos != '\n') {
-                debugs(66, 2, HERE << "failed to parse a quoted-string header field with '\\r' octet " << (start-pos)
+                debugs(66, 2, "failed to parse a quoted-string header field with '\\r' octet " << (start-pos)
                        << " bytes into '" << start << "'");
                 val->clean();
                 return 0;
@@ -189,14 +190,14 @@ httpHeaderParseQuotedString(const char *start, const int len, String *val)
         if (*pos == '\n') {
             ++pos;
             if ( (pos-start) > len || (*pos != ' ' && *pos != '\t')) {
-                debugs(66, 2, HERE << "failed to parse multiline quoted-string header field '" << start << "'");
+                debugs(66, 2, "failed to parse multiline quoted-string header field '" << start << "'");
                 val->clean();
                 return 0;
             }
             // TODO: replace the entire LWS with a space
             val->append(" ");
             ++pos;
-            debugs(66, 2, HERE << "len < pos-start => " << len << " < " << (pos-start));
+            debugs(66, 2, "len < pos-start => " << len << " < " << (pos-start));
             continue;
         }
 
@@ -204,7 +205,7 @@ httpHeaderParseQuotedString(const char *start, const int len, String *val)
         if (quoted) {
             ++pos;
             if (!*pos || (pos-start) > len) {
-                debugs(66, 2, HERE << "failed to parse a quoted-string header field near '" << start << "'");
+                debugs(66, 2, "failed to parse a quoted-string header field near '" << start << "'");
                 val->clean();
                 return 0;
             }
@@ -213,7 +214,7 @@ httpHeaderParseQuotedString(const char *start, const int len, String *val)
         while (end < (start+len) && *end != '\\' && *end != '\"' && (unsigned char)*end > 0x1F && *end != 0x7F)
             ++end;
         if (((unsigned char)*end <= 0x1F && *end != '\r' && *end != '\n') || *end == 0x7F) {
-            debugs(66, 2, HERE << "failed to parse a quoted-string header field with CTL octet " << (start-pos)
+            debugs(66, 2, "failed to parse a quoted-string header field with CTL octet " << (start-pos)
                    << " bytes into '" << start << "'");
             val->clean();
             return 0;
@@ -223,14 +224,23 @@ httpHeaderParseQuotedString(const char *start, const int len, String *val)
     }
 
     if (*pos != '\"') {
-        debugs(66, 2, HERE << "failed to parse a quoted-string header field which did not end with \" ");
+        debugs(66, 2, "failed to parse a quoted-string header field which did not end with \" ");
         val->clean();
         return 0;
     }
     /* Make sure it's defined even if empty "" */
     if (!val->termedBuf())
-        val->limitInit("", 0);
+        val->assign("", 0);
     return 1;
+}
+
+SBuf
+Http::SlowlyParseQuotedString(const char * const description, const char * const start, const size_t length)
+{
+    String s;
+    if (!httpHeaderParseQuotedString(start, length, &s))
+        throw TextException(ToSBuf("Cannot parse ", description, " as a quoted string"), Here());
+    return StringToSBuf(s);
 }
 
 SBuf
@@ -273,7 +283,7 @@ httpHeaderQuoteString(const char *raw)
  * \retval 1    Header has no access controls to test
  */
 static int
-httpHdrMangle(HttpHeaderEntry * e, HttpRequest * request, HeaderManglers *hms)
+httpHdrMangle(HttpHeaderEntry * e, HttpRequest * request, HeaderManglers *hms, const AccessLogEntryPointer &al)
 {
     int retval;
 
@@ -287,15 +297,21 @@ httpHdrMangle(HttpHeaderEntry * e, HttpRequest * request, HeaderManglers *hms)
         return 1;
     }
 
-    ACLFilledChecklist checklist(hm->access_list, request, NULL);
+    ACLFilledChecklist checklist(hm->access_list, request);
+    checklist.updateAle(al);
 
+    // XXX: The two "It was denied" clauses below mishandle cases with no
+    // matching rules, violating the "If no rules within the set have matching
+    // ACLs, the header field is left as is" promise in squid.conf.
+    // TODO: Use Acl::Answer::implicit. See HttpStateData::forwardUpgrade().
     if (checklist.fastCheck().allowed()) {
         /* aclCheckFast returns true for allow. */
         debugs(66, 7, "checklist for mangler is positive. Mangle");
         retval = 1;
-    } else if (NULL == hm->replacement) {
+    } else if (nullptr == hm->replacement) {
         /* It was denied, and we don't have any replacement */
         debugs(66, 7, "checklist denied, we have no replacement. Pass");
+        // XXX: We said "Pass", but the caller will delete on zero retval.
         retval = 0;
     } else {
         /* It was denied, but we have a replacement. Replace the
@@ -335,7 +351,7 @@ httpHdrMangleList(HttpHeader *l, HttpRequest *request, const AccessLogEntryPoint
     if (hms) {
         int headers_deleted = 0;
         while ((e = l->getEntry(&p))) {
-            if (0 == httpHdrMangle(e, request, hms))
+            if (httpHdrMangle(e, request, hms, al) == 0)
                 l->delAt(p, headers_deleted);
         }
 
@@ -359,7 +375,7 @@ static
 void header_mangler_dump_access(StoreEntry * entry, const char *option,
                                 const headerMangler &m, const char *name)
 {
-    if (m.access_list != NULL) {
+    if (m.access_list != nullptr) {
         storeAppendPrintf(entry, "%s ", option);
         dump_acl_access(entry, name, m.access_list);
     }
@@ -456,7 +472,8 @@ HeaderManglers::find(const HttpHeaderEntry &e) const
     if (e.id == Http::HdrType::OTHER) {
         // does it have an ACL list configured?
         // Optimize: use a name type that we do not need to convert to here
-        const ManglersByName::const_iterator i = custom.find(e.name.termedBuf());
+        SBuf tmp(e.name); // XXX: performance regression. c_str() reallocates
+        const ManglersByName::const_iterator i = custom.find(tmp.c_str());
         if (i != custom.end())
             return &i->second;
     }
@@ -469,26 +486,21 @@ HeaderManglers::find(const HttpHeaderEntry &e) const
     if (all.access_list)
         return &all;
 
-    return NULL;
+    return nullptr;
 }
 
 void
 httpHdrAdd(HttpHeader *heads, HttpRequest *request, const AccessLogEntryPointer &al, HeaderWithAclList &headersAdd)
 {
-    ACLFilledChecklist checklist(NULL, request, NULL);
-
-    checklist.al = al;
-    if (al && al->reply) {
-        checklist.reply = al->reply;
-        HTTPMSGLOCK(checklist.reply);
-    }
+    ACLFilledChecklist checklist(nullptr, request);
+    checklist.updateAle(al);
 
     for (HeaderWithAclList::const_iterator hwa = headersAdd.begin(); hwa != headersAdd.end(); ++hwa) {
         if (!hwa->aclList || checklist.fastCheck(hwa->aclList).allowed()) {
-            const char *fieldValue = NULL;
+            const char *fieldValue = nullptr;
             MemBuf mb;
             if (hwa->quoted) {
-                if (al != NULL) {
+                if (al != nullptr) {
                     mb.init();
                     hwa->valueFormat->assemble(mb, al, 0);
                     fieldValue = mb.content();
@@ -500,8 +512,7 @@ httpHdrAdd(HttpHeader *heads, HttpRequest *request, const AccessLogEntryPointer 
             if (!fieldValue || fieldValue[0] == '\0')
                 fieldValue = "-";
 
-            HttpHeaderEntry *e = new HttpHeaderEntry(hwa->fieldId, hwa->fieldName.c_str(),
-                    fieldValue);
+            HttpHeaderEntry *e = new HttpHeaderEntry(hwa->fieldId, SBuf(hwa->fieldName), fieldValue);
             heads->addEntry(e);
         }
     }

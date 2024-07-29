@@ -1,25 +1,23 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_ADAPTATION__SERVICE_H
-#define SQUID_ADAPTATION__SERVICE_H
+#ifndef SQUID_SRC_ADAPTATION_SERVICE_H
+#define SQUID_SRC_ADAPTATION_SERVICE_H
 
 #include "AccessLogEntry.h"
 #include "adaptation/Elements.h"
 #include "adaptation/forward.h"
 #include "adaptation/ServiceConfig.h"
 #include "base/RefCount.h"
+#include "http/forward.h"
 #include "SquidString.h"
 
 // TODO: Move src/ICAP/ICAPServiceRep.h API comments here and update them
-
-class HttpMsg;
-class HttpRequest;
 
 namespace Adaptation
 {
@@ -34,13 +32,13 @@ public:
 
 public:
     explicit Service(const ServiceConfigPointer &aConfig);
-    virtual ~Service();
+    ~Service() override;
 
     virtual bool probed() const = 0; // see comments above
     virtual bool broken() const;
     virtual bool up() const = 0; // see comments above
 
-    virtual Initiate *makeXactLauncher(HttpMsg *virginHeader, HttpRequest *virginCause, AccessLogEntry::Pointer &alp) = 0;
+    virtual Initiate *makeXactLauncher(Http::Message *virginHeader, HttpRequest *virginCause, AccessLogEntry::Pointer &alp) = 0;
 
     bool wants(const ServiceFilter &filter) const;
 
@@ -78,5 +76,5 @@ void DetachServices();
 
 } // namespace Adaptation
 
-#endif /* SQUID_ADAPTATION__SERVICE_H */
+#endif /* SQUID_SRC_ADAPTATION_SERVICE_H */
 

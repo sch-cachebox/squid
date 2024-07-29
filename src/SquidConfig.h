@@ -1,30 +1,38 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_SQUIDCONFIG_H_
-#define SQUID_SQUIDCONFIG_H_
+#ifndef SQUID_SRC_SQUIDCONFIG_H
+#define SQUID_SRC_SQUIDCONFIG_H
 
 #include "acl/forward.h"
 #include "base/RefCount.h"
 #include "base/YesNoNone.h"
+#if USE_DELAY_POOLS
 #include "ClientDelayConfig.h"
 #include "DelayConfig.h"
+#endif
 #include "helper/ChildConfig.h"
 #include "HttpHeaderTools.h"
 #include "ip/Address.h"
+#if USE_DELAY_POOLS
+#include "MessageDelayPools.h"
+#endif
 #include "Notes.h"
+#include "security/Context.h"
 #include "security/forward.h"
-#include "SquidTime.h"
 #if USE_OPENSSL
 #include "ssl/support.h"
 #endif
 #include "store/Disk.h"
 #include "store/forward.h"
+#include "time/gadgets.h"
+
+#include <chrono>
 
 #if USE_OPENSSL
 class sslproxy_cert_sign;
@@ -35,13 +43,16 @@ namespace Mgr
 {
 class ActionPasswordList;
 } // namespace Mgr
-class CachePeer;
+
+class CachePeers;
 class CustomLog;
 class CpuAffinityMap;
+class DebugMessages;
 class external_acl;
 class HeaderManglers;
 class RefreshPattern;
 class RemovalPolicySettings;
+class HttpUpgradeProtocolAccess;
 
 namespace AnyP
 {
@@ -176,6 +187,7 @@ public:
 #if ICAP_CLIENT
         CustomLog *icaplogs;
 #endif
+        Security::KeyLog *tlsKeys; ///< one optional tls_key_log
         int rotateNumber;
     } Log;
     char *adminEmail;
@@ -203,9 +215,6 @@ public:
 
     Helper::ChildConfig redirectChildren;
     Helper::ChildConfig storeIdChildren;
-    time_t authenticateGCInterval;
-    time_t authenticateTTL;
-    time_t authenticateIpTTL;
 
     struct {
         char *surrogate_id;
@@ -218,15 +227,8 @@ public:
     char *etcHostsPath;
     char *visibleHostname;
     char *uniqueHostname;
-    wordlist *hostnameAliases;
+    SBufList hostnameAliases;
     char *errHtmlText;
-
-    struct {
-        char *host;
-        char *file;
-        time_t period;
-        unsigned short port;
-    } Announce;
 
     struct {
 
@@ -236,14 +238,13 @@ public:
         Ip::Address snmp_incoming;
         Ip::Address snmp_outgoing;
 #endif
-        /* FIXME INET6 : this should really be a CIDR value */
+        // TODO: this should really be a CIDR value
         Ip::Address client_netmask;
     } Addrs;
     size_t tcpRcvBufsz;
     size_t udpMaxHitObjsz;
     wordlist *mcast_group_list;
-    wordlist *dns_nameservers;
-    CachePeer *peers;
+    CachePeers *peers;
     int npeers;
 
     struct {
@@ -283,8 +284,6 @@ public:
         int buffered_logs;
         int common_log;
         int log_mime_hdrs;
-        int log_fqdn;
-        int announce;
         int mem_pools;
         int test_reachability;
         int half_closed_clients;
@@ -312,7 +311,6 @@ public:
 
         int vary_ignore_expire;
         int surrogate_is_remote;
-        int request_entities;
         int detect_broken_server_pconns;
         int relaxed_header_parser;
         int check_hostnames;
@@ -344,14 +342,18 @@ public:
 #endif
     } onoff;
 
-    int64_t collapsed_forwarding_shared_entries_limit;
+    int64_t shared_transient_entries_limit;
 
     int pipeline_max_prefetch;
 
+    // these values are actually unsigned
+    // TODO: extend the parser to support more nuanced types
     int forward_max_tries;
     int connect_retries;
 
-    class ACL *aclList;
+    std::chrono::nanoseconds paranoid_hit_validation;
+
+    class Acl::Node *aclList;
 
     struct {
         acl_access *http;
@@ -389,7 +391,7 @@ public:
         acl_access *followXFF;
 #endif /* FOLLOW_X_FORWARDED_FOR */
 
-        /// acceptible PROXY protocol clients
+        /// acceptable PROXY protocol clients
         acl_access *proxyProtocol;
 
         /// spoof_client_ip squid.conf acl.
@@ -401,6 +403,7 @@ public:
 
         acl_access *forceRequestBodyContinuation;
         acl_access *serverPconnForNonretriable;
+        acl_access *collapsedForwardingAccess;
     } accessList;
     AclDenyInfoList *denyInfoList;
 
@@ -441,10 +444,11 @@ public:
 
     DelayConfig Delay;
     ClientDelayConfig ClientDelay;
+    MessageDelayConfig MessageDelay;
 #endif
 
-    struct {
-        struct {
+    struct CommIncoming {
+        struct Measure {
             int average;
             int min_poll;
         } dns, udp, tcp;
@@ -452,16 +456,6 @@ public:
     int max_open_disk_fds;
     int uri_whitespace;
     AclSizeLimit *rangeOffsetLimit;
-#if MULTICAST_MISS_STREAM
-
-    struct {
-
-        Ip::Address addr;
-        int ttl;
-        unsigned short port;
-        char *encode_key;
-    } mcast_miss;
-#endif
 
     /// request_header_access and request_header_replace
     HeaderManglers *request_header_access;
@@ -471,6 +465,8 @@ public:
     HeaderWithAclList *request_header_add;
     ///reply_header_add access list
     HeaderWithAclList *reply_header_add;
+    /// http_upgrade_request_protocols
+    HttpUpgradeProtocolAccess *http_upgrade_request_protocols;
     ///note
     Notes notes;
     char *coredump_dir;
@@ -523,7 +519,7 @@ public:
     CpuAffinityMap *cpuAffinityMap;
 
 #if USE_LOADABLE_MODULES
-    wordlist *loadable_module_names;
+    SBufList loadable_module_names;
 #endif
 
     int client_ip_max_connections;
@@ -538,10 +534,16 @@ public:
     char *storeId_extras;
 
     struct {
+        SBufList nameservers;
         int v4_first;       ///< Place IPv4 first in the order of DNS results.
         ssize_t packet_max; ///< maximum size EDNS advertised for DNS replies.
     } dns;
 
+    struct {
+        int connect_limit;
+        int connect_gap;
+        int connect_timeout;
+    } happyEyeballs;
 };
 
 extern SquidConfig Config;
@@ -562,5 +564,5 @@ public:
 
 extern SquidConfig2 Config2;
 
-#endif /* SQUID_SQUIDCONFIG_H_ */
+#endif /* SQUID_SRC_SQUIDCONFIG_H */
 

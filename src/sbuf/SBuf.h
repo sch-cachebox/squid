@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -8,12 +8,12 @@
 
 /* DEBUG: section 24    SBuf */
 
-#ifndef SQUID_SBUF_H
-#define SQUID_SBUF_H
+#ifndef SQUID_SRC_SBUF_SBUF_H
+#define SQUID_SRC_SBUF_SBUF_H
 
 #include "base/InstanceId.h"
 #include "base/TextException.h"
-#include "Debug.h"
+#include "debug/Stream.h"
 #include "globals.h"
 #include "sbuf/forward.h"
 #include "sbuf/MemBlob.h"
@@ -45,9 +45,16 @@ class CharacterSet;
  * Please note that any operation on the underlying SBuf may invalidate
  * all iterators over it, resulting in undefined behavior by them.
  */
-class SBufIterator : public std::iterator<std::input_iterator_tag, char>
+class SBufIterator
 {
 public:
+    // iterator traits
+    using iterator_category = std::input_iterator_tag;
+    using value_type = char;
+    using difference_type = std::ptrdiff_t;
+    using pointer = char*;
+    using reference = char&;
+
     friend class SBuf;
     typedef MemBlob::size_type size_type;
     bool operator==(const SBufIterator &s) const;
@@ -89,6 +96,7 @@ public:
     typedef MemBlob::size_type size_type;
     typedef SBufIterator const_iterator;
     typedef SBufReverseIterator const_reverse_iterator;
+    using value_type = char;
     static const size_type npos = 0xffffffff; // max(uint32_t)
 
     /// Maximum size of a SBuf. By design it MUST be < MAX(size_type)/2. Currently 256Mb.
@@ -132,20 +140,22 @@ public:
      * Current SBuf will share backing store with the assigned one.
      */
     SBuf& operator =(const SBuf & S) {return assign(S);}
-#if __cplusplus >= 201103L
     SBuf& operator =(SBuf &&S) {
         ++stats.moves;
         if (this != &S) {
             store_ = std::move(S.store_);
             off_ = S.off_;
             len_ = S.len_;
-            S.store_ = NULL; //RefCount supports NULL, and S is about to be destructed
+            S.store_ = nullptr; //RefCount supports NULL, and S is about to be destructed
             S.off_ = 0;
             S.len_ = 0;
         }
         return *this;
     }
-#endif
+
+    // XXX: assign(s,n)/append(s,n) calls do not assign or append a c-string as
+    // documented -- they do not stop at the first NUL character! They assign or
+    // append the entire raw memory area, including any embedded NUL characters.
 
     /** Import a c-string into a SBuf, copying the data.
      *
@@ -180,8 +190,11 @@ public:
      */
     SBuf& append(const SBuf & S);
 
+    /// \copydoc push_back(char)
+    SBuf& append(const char c) { push_back(c); return *this; }
+
     /// Append a single character. The character may be NUL (\0).
-    SBuf& append(const char c);
+    void push_back(char);
 
     /** Append operation for C-style strings.
      *
@@ -202,13 +215,13 @@ public:
      * \note arguments may be evaluated more than once, be careful
      *       of side-effects
      */
-    SBuf& Printf(const char *fmt, ...);
+    SBuf& Printf(const char *fmt, ...) PRINTF_FORMAT_ARG2;
 
     /** Append operation with printf-style arguments
      * \note arguments may be evaluated more than once, be careful
      *       of side-effects
      */
-    SBuf& appendf(const char *fmt, ...);
+    SBuf& appendf(const char *fmt, ...)  PRINTF_FORMAT_ARG2;
 
     /** Append operation, with vsprintf(3)-style arguments.
      * \note arguments may be evaluated more than once, be careful
@@ -221,7 +234,7 @@ public:
 
     /** print SBuf contents and debug information about the SBuf to an ostream
      *
-     * Debug function, dumps to a stream informations on the current SBuf,
+     * Debug function, dumps to a stream information on the current SBuf,
      * including low-level details and statistics.
      */
     std::ostream& dump(std::ostream &os) const;
@@ -325,7 +338,7 @@ public:
      */
     SBuf consume(size_type n = npos);
 
-    /// gets global statistic informations
+    /// gets global statistic information
     static const SBufStats& GetStats();
 
     /** Copy SBuf contents into user-supplied C buffer.
@@ -644,7 +657,7 @@ private:
 
     /**
      * Try to guesstimate how big a MemBlob to allocate.
-     * The result is guarranteed to be to be at least the desired size.
+     * The result is guaranteed to be to be at least the desired size.
      */
     size_type estimateCapacity(size_type desired) const {return (2*desired);}
 
@@ -782,5 +795,5 @@ SBufIterator::operator!=(const SBufIterator &s) const
     return iter != s.iter;
 }
 
-#endif /* SQUID_SBUF_H */
+#endif /* SQUID_SRC_SBUF_SBUF_H */
 

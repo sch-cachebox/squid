@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_STORE_STORAGE_H
-#define SQUID_STORE_STORAGE_H
+#ifndef SQUID_SRC_STORE_STORAGE_H
+#define SQUID_SRC_STORE_STORAGE_H
 
 #include "base/RefCount.h"
 #include "http/RequestMethod.h"
@@ -23,7 +23,7 @@ namespace Store {
 class Storage: public RefCountable
 {
 public:
-    virtual ~Storage() {}
+    ~Storage() override {}
 
     /// create system resources needed for this store to operate in the future
     virtual void create() = 0;
@@ -55,7 +55,7 @@ public:
 
     /**
      * Output stats to the provided store entry.
-     \todo make these calls asynchronous
+     * TODO: make these calls asynchronous
      */
     virtual void stat(StoreEntry &e) const = 0;
 
@@ -76,14 +76,9 @@ public:
 
     /// prepare for shutdown
     virtual void sync() {}
-
-    /// whether this storage is capable of serving multiple workers;
-    /// a true result does not imply [lack of] non-SMP support because
-    /// [only] some SMP-aware storages also support non-SMP configss
-    virtual bool smpAware() const = 0;
 };
 
 } // namespace Store
 
-#endif /* SQUID_STORE_STORAGE_H */
+#endif /* SQUID_SRC_STORE_STORAGE_H */
 

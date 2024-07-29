@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -10,7 +10,7 @@
 
 #include "squid.h"
 #include "ExternalACLEntry.h"
-#include "SquidTime.h"
+#include "time/gadgets.h"
 
 /******************************************************************
  * external_acl cache
@@ -19,10 +19,10 @@
 ExternalACLEntry::ExternalACLEntry() :
     notes()
 {
-    lru.next = lru.prev = NULL;
+    lru.next = lru.prev = nullptr;
     result = ACCESS_DENIED;
     date = 0;
-    def = NULL;
+    def = nullptr;
 }
 
 ExternalACLEntry::~ExternalACLEntry()
@@ -37,7 +37,7 @@ ExternalACLEntry::update(ExternalACLEntryData const &someData)
     result = someData.result;
 
     // replace all notes. not combine
-    notes.entries.clear();
+    notes.clear();
     notes.append(&someData.notes);
 
 #if USE_AUTH

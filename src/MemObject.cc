@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -13,10 +13,8 @@
 #include "Generic.h"
 #include "globals.h"
 #include "HttpReply.h"
-#include "HttpRequest.h"
 #include "MemBuf.h"
 #include "MemObject.h"
-#include "profiler/Profiler.h"
 #include "SquidConfig.h"
 #include "Store.h"
 #include "StoreClient.h"
@@ -43,7 +41,7 @@ url_checksum(const char *url)
 
 #endif
 
-RemovalPolicy * mem_policy = NULL;
+RemovalPolicy * mem_policy = nullptr;
 
 size_t
 MemObject::inUseCount()
@@ -54,24 +52,24 @@ MemObject::inUseCount()
 const char *
 MemObject::storeId() const
 {
-    if (!storeId_.size()) {
-        debugs(20, DBG_IMPORTANT, "Bug: Missing MemObject::storeId value");
+    if (storeId_.isEmpty()) {
+        debugs(20, DBG_IMPORTANT, "ERROR: Squid BUG: Missing MemObject::storeId value");
         dump();
         storeId_ = "[unknown_URI]";
     }
-    return storeId_.termedBuf();
+    return storeId_.c_str();
 }
 
 const char *
 MemObject::logUri() const
 {
-    return logUri_.size() ? logUri_.termedBuf() : storeId();
+    return logUri_.isEmpty() ? storeId() : logUri_.c_str();
 }
 
 bool
 MemObject::hasUris() const
 {
-    return storeId_.size();
+    return !storeId_.isEmpty();
 }
 
 void
@@ -85,7 +83,7 @@ MemObject::setUris(char const *aStoreId, char const *aLogUri, const HttpRequestM
 
     // fast pointer comparison for a common storeCreateEntry(url,url,...) case
     if (!aLogUri || aLogUri == aStoreId)
-        logUri_.clean(); // use storeId_ by default to minimize copying
+        logUri_.clear(); // use storeId_ by default to minimize copying
     else
         logUri_ = aLogUri;
 
@@ -101,53 +99,42 @@ MemObject::MemObject()
     debugs(20, 3, "MemObject constructed, this=" << this);
     ping_reply_callback = nullptr;
     memset(&start_ping, 0, sizeof(start_ping));
-    _reply = new HttpReply;
-    HTTPMSGLOCK(_reply);
+    reply_ = new HttpReply;
 }
 
 MemObject::~MemObject()
 {
     debugs(20, 3, "MemObject destructed, this=" << this);
-    const Ctx ctx = ctx_enter(hasUris() ? urlXXX() : "[unknown_ctx]");
 
 #if URL_CHECKSUM_DEBUG
     checkUrlChecksum();
 #endif
 
-    if (!shutting_down) { // Store::Root() is FATALly missing during shutdown
-        assert(xitTable.index < 0);
-        assert(memCache.index < 0);
-        assert(swapout.sio == NULL);
-    }
+    assert(xitTable.index < 0);
+    assert(memCache.index < 0);
+    assert(swapout.sio == nullptr);
 
     data_hdr.freeContent();
+}
 
-#if 0
-    /*
-     * There is no way to abort FD-less clients, so they might
-     * still have mem->clients set.
-     */
-    assert(clients.head == NULL);
-
-#endif
-
-    HTTPMSGUNLOCK(_reply);
-
-    HTTPMSGUNLOCK(request);
-
-    ctx_exit(ctx);              /* must exit before we free mem->url */
+HttpReply &
+MemObject::adjustableBaseReply()
+{
+    assert(!updatedReply_);
+    return *reply_;
 }
 
 void
-MemObject::unlinkRequest()
+MemObject::replaceBaseReply(const HttpReplyPointer &r)
 {
-    HTTPMSGUNLOCK(request);
+    assert(r);
+    reply_ = r;
+    updatedReply_ = nullptr;
 }
 
 void
 MemObject::write(const StoreIOBuffer &writeBuffer)
 {
-    PROF_start(MemObject_write);
     debugs(19, 6, "memWrite: offset " << writeBuffer.offset << " len " << writeBuffer.length);
 
     /* We don't separate out mime headers yet, so ensure that the first
@@ -156,48 +143,31 @@ MemObject::write(const StoreIOBuffer &writeBuffer)
     assert (data_hdr.endOffset() || writeBuffer.offset == 0);
 
     assert (data_hdr.write (writeBuffer));
-    PROF_stop(MemObject_write);
 }
 
 void
 MemObject::dump() const
 {
     data_hdr.dump();
-#if 0
-    /* do we want this one? */
-    debugs(20, DBG_IMPORTANT, "MemObject->data.origin_offset: " << (data_hdr.head ? data_hdr.head->nodeBuffer.offset : 0));
-#endif
 
-    debugs(20, DBG_IMPORTANT, "MemObject->start_ping: " << start_ping.tv_sec  << "."<< std::setfill('0') << std::setw(6) << start_ping.tv_usec);
+    debugs(20, DBG_IMPORTANT, "MemObject->start_ping: " << start_ping);
     debugs(20, DBG_IMPORTANT, "MemObject->inmem_hi: " << data_hdr.endOffset());
     debugs(20, DBG_IMPORTANT, "MemObject->inmem_lo: " << inmem_lo);
     debugs(20, DBG_IMPORTANT, "MemObject->nclients: " << nclients);
-    debugs(20, DBG_IMPORTANT, "MemObject->reply: " << _reply);
+    debugs(20, DBG_IMPORTANT, "MemObject->reply: " << reply_);
+    debugs(20, DBG_IMPORTANT, "MemObject->updatedReply: " << updatedReply_);
+    debugs(20, DBG_IMPORTANT, "MemObject->appliedUpdates: " << appliedUpdates);
     debugs(20, DBG_IMPORTANT, "MemObject->request: " << request);
     debugs(20, DBG_IMPORTANT, "MemObject->logUri: " << logUri_);
     debugs(20, DBG_IMPORTANT, "MemObject->storeId: " << storeId_);
-}
-
-HttpReply const *
-MemObject::getReply() const
-{
-    return _reply;
-}
-
-void
-MemObject::replaceHttpReply(HttpReply *newrep)
-{
-    HTTPMSGUNLOCK(_reply);
-    _reply = newrep;
-    HTTPMSGLOCK(_reply);
 }
 
 struct LowestMemReader : public unary_function<store_client, void> {
     LowestMemReader(int64_t seed):current(seed) {}
 
     void operator() (store_client const &x) {
-        if (x.memReaderHasLowerOffset(current))
-            current = x.copyInto.offset;
+        if (x.getType() == STORE_MEM_CLIENT)
+            current = std::min(current, x.discardableHttpEnd());
     }
 
     int64_t current;
@@ -251,8 +221,8 @@ MemObject::markEndOfReplyHeaders()
 {
     const int hdr_sz = endOffset();
     assert(hdr_sz >= 0);
-    assert(_reply);
-    _reply->hdr_sz = hdr_sz;
+    assert(reply_);
+    reply_->hdr_sz = hdr_sz;
 }
 
 int64_t
@@ -267,27 +237,40 @@ MemObject::size() const
 int64_t
 MemObject::expectedReplySize() const
 {
-    debugs(20, 7, HERE << "object_sz: " << object_sz);
-    if (object_sz >= 0) // complete() has been called; we know the exact answer
+    if (object_sz >= 0) {
+        debugs(20, 7, object_sz << " frozen by complete()");
         return object_sz;
-
-    if (_reply) {
-        const int64_t clen = _reply->bodySize(method);
-        debugs(20, 7, HERE << "clen: " << clen);
-        if (clen >= 0 && _reply->hdr_sz > 0) // yuck: HttpMsg sets hdr_sz to 0
-            return clen + _reply->hdr_sz;
     }
 
-    return -1; // not enough information to predict
+    const auto hdr_sz = baseReply().hdr_sz;
+
+    // Cannot predict future length using an empty/unset or HTTP/0 reply.
+    // For any HTTP/1 reply, hdr_sz is positive  -- status-line cannot be empty.
+    if (hdr_sz <= 0)
+        return -1;
+
+    const auto clen = baseReply().bodySize(method);
+    if (clen < 0) {
+        debugs(20, 7, "unknown; hdr: " << hdr_sz);
+        return -1;
+    }
+
+    const auto messageSize = clen + hdr_sz;
+    debugs(20, 7, messageSize << " hdr: " << hdr_sz << " clen: " << clen);
+    return messageSize;
 }
 
 void
 MemObject::reset()
 {
-    assert(swapout.sio == NULL);
+    assert(swapout.sio == nullptr);
     data_hdr.freeContent();
     inmem_lo = 0;
     /* Should we check for clients? */
+    assert(reply_);
+    reply_->reset();
+    updatedReply_ = nullptr;
+    appliedUpdates = false;
 }
 
 int64_t
@@ -304,11 +287,12 @@ MemObject::lowestMemReaderOffset() const
 bool
 MemObject::readAheadPolicyCanRead() const
 {
-    const bool canRead = endOffset() - getReply()->hdr_sz <
+    const auto savedHttpHeaders = baseReply().hdr_sz;
+    const bool canRead = endOffset() - savedHttpHeaders <
                          lowestMemReaderOffset() + Config.readAheadGap;
 
     if (!canRead) {
-        debugs(19, 9, "no: " << endOffset() << '-' << getReply()->hdr_sz <<
+        debugs(19, 5, "no: " << endOffset() << '-' << savedHttpHeaders <<
                " < " << lowestMemReaderOffset() << '+' << Config.readAheadGap);
     }
 
@@ -349,7 +333,7 @@ MemObject::objectBytesOnDisk() const
      * yet.
      */
 
-    if (swapout.sio.getRaw() == NULL)
+    if (swapout.sio.getRaw() == nullptr)
         return 0;
 
     int64_t nwritten = swapout.sio->offset();
@@ -369,6 +353,12 @@ MemObject::policyLowestOffsetToKeep(bool swap) const
      */
     int64_t lowest_offset = lowestMemReaderOffset();
 
+    // XXX: Remove the last (Config.onoff.memory_cache_first-based) condition
+    // and update keepForLocalMemoryCache() accordingly. The caller wants to
+    // remove all local memory that is safe to remove. Honoring caching
+    // preferences is its responsibility. Our responsibility is safety. The
+    // situation was different when ff4b33f added that condition -- there was no
+    // keepInLocalMemory/keepForLocalMemoryCache() call guard back then.
     if (endOffset() < lowest_offset ||
             endOffset() - inmem_lo > (int64_t)Config.Store.maxInMemObjSize ||
             (swap && !Config.onoff.memory_cache_first))
@@ -430,6 +420,8 @@ MemObject::mostBytesWanted(int max, bool ignoreDelayPools) const
         DelayId largestAllowance = mostBytesAllowed ();
         return largestAllowance.bytesWanted(0, max);
     }
+#else
+    (void)ignoreDelayPools;
 #endif
 
     return max;
@@ -444,12 +436,13 @@ MemObject::setNoDelay(bool const newValue)
         store_client *sc = (store_client *) node->data;
         sc->delayId.setNoDelay(newValue);
     }
-
+#else
+    (void)newValue;
 #endif
 }
 
 void
-MemObject::delayRead(DeferredRead const &aRead)
+MemObject::delayRead(const AsyncCall::Pointer &aRead)
 {
 #if USE_DELAY_POOLS
     if (readAheadPolicyCanRead()) {
@@ -459,13 +452,13 @@ MemObject::delayRead(DeferredRead const &aRead)
         }
     }
 #endif
-    deferredReads.delayRead(aRead);
+    deferredReads.delay(aRead);
 }
 
 void
 MemObject::kickReads()
 {
-    deferredReads.kickReads(-1);
+    deferredReads.schedule();
 }
 
 #if USE_DELAY_POOLS
@@ -478,21 +471,8 @@ MemObject::mostBytesAllowed() const
 
     for (dlink_node *node = clients.head; node; node = node->next) {
         store_client *sc = (store_client *) node->data;
-#if 0
-        /* This test is invalid because the client may be writing data
-         * and thus will want data immediately.
-         * If we include the test, there is a race condition when too much
-         * data is read - if all sc's are writing when a read is scheduled.
-         * XXX: fixme.
-         */
 
-        if (!sc->callbackPending())
-            /* not waiting for more data */
-            continue;
-
-#endif
-
-        j = sc->delayId.bytesWanted(0, sc->copyInto.length);
+        j = sc->bytesWanted();
 
         if (j > jmax) {
             jmax = j;

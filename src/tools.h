@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -8,8 +8,8 @@
 
 /* DEBUG: section 21    Misc Functions */
 
-#ifndef SQUID_TOOLS_H_
-#define SQUID_TOOLS_H_
+#ifndef SQUID_SRC_TOOLS_H
+#define SQUID_SRC_TOOLS_H
 
 #include "sbuf/SBuf.h"
 #include "typedefs.h"
@@ -88,15 +88,11 @@ void releaseServerSockets(void);
 void PrintRusage(void);
 void dumpMallocStats(void);
 
-#if _SQUID_NEXT_
-typedef union wait PidStatus;
-#else
 typedef int PidStatus;
-#endif
 
 /**
  * Compatibility wrapper function for waitpid
- * \pid the pid of child proccess to wait for.
+ * \pid the pid of child process to wait for.
  * \param status the exit status returned by waitpid
  * \param flags WNOHANG or 0
  */
@@ -113,10 +109,10 @@ inline pid_t WaitForAnyPid(PidStatus &status, int flags)
     return WaitForOnePid(-1, status, flags);
 }
 
-#if _SQUID_WINDOWS_
+#if _SQUID_WINDOWS_ || _SQUID_MINGW_
 /// xstrerror(errno) equivalent for Windows errors returned by GetLastError()
 SBuf WindowsErrorMessage(DWORD errorId);
-#endif // _SQUID_WINDOWS_
+#endif // _SQUID_WINDOWS_ || _SQUID_MINGW_
 
-#endif /* SQUID_TOOLS_H_ */
+#endif /* SQUID_SRC_TOOLS_H */
 

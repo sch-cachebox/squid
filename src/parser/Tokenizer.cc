@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -9,13 +9,13 @@
 /* DEBUG: section 24    SBuf */
 
 #include "squid.h"
-#include "Debug.h"
+#include "debug/Stream.h"
+#include "parser/forward.h"
 #include "parser/Tokenizer.h"
+#include "sbuf/Stream.h"
 
+#include <cctype>
 #include <cerrno>
-#if HAVE_CTYPE_H
-#include <ctype.h>
-#endif
 
 /// convenience method: consumes up to n bytes, counts, and returns them
 SBuf
@@ -96,6 +96,23 @@ Parser::Tokenizer::prefix(SBuf &returnedToken, const CharacterSet &tokenChars, c
     return true;
 }
 
+SBuf
+Parser::Tokenizer::prefix(const char *description, const CharacterSet &tokenChars, const SBuf::size_type limit)
+{
+    if (atEnd())
+        throw InsufficientInput();
+
+    SBuf result;
+
+    if (!prefix(result, tokenChars, limit))
+        throw TexcHere(ToSBuf("cannot parse ", description));
+
+    if (atEnd())
+        throw InsufficientInput();
+
+    return result;
+}
+
 bool
 Parser::Tokenizer::suffix(SBuf &returnedToken, const CharacterSet &tokenChars, const SBuf::size_type limit)
 {
@@ -126,6 +143,18 @@ Parser::Tokenizer::skipAll(const CharacterSet &tokenChars)
     }
     debugs(24, 8, "skipping all in " << tokenChars.name << " len " << prefixLen);
     return success(prefixLen);
+}
+
+void
+Parser::Tokenizer::skipRequired(const char *description, const SBuf &tokenToSkip)
+{
+    if (skip(tokenToSkip) || tokenToSkip.isEmpty())
+        return;
+
+    if (tokenToSkip.startsWith(buf_))
+        throw InsufficientInput();
+
+    throw TextException(ToSBuf("cannot skip ", description), Here());
 }
 
 bool
@@ -213,7 +242,7 @@ Parser::Tokenizer::int64(int64_t & result, int base, bool allowSign, const SBuf:
 
     const SBuf range(buf_.substr(0,limit));
 
-    //fixme: account for buf_.size()
+    // XXX: account for buf_.size()
     bool neg = false;
     const char *s = range.rawContent();
     const char *end = range.rawContent() + range.length();
@@ -235,7 +264,6 @@ Parser::Tokenizer::int64(int64_t & result, int base, bool allowSign, const SBuf:
     if (base == 0) {
         if ( *s == '0') {
             base = 8;
-            ++s;
         } else {
             base = 10;
         }
@@ -281,5 +309,26 @@ Parser::Tokenizer::int64(int64_t & result, int base, bool allowSign, const SBuf:
 
     result = acc;
     return success(s - range.rawContent());
+}
+
+int64_t
+Parser::Tokenizer::udec64(const char *description, const SBuf::size_type limit)
+{
+    if (atEnd())
+        throw InsufficientInput();
+
+    int64_t result = 0;
+
+    // Since we only support unsigned decimals, a parsing failure with a
+    // non-empty input always implies invalid/malformed input (or a buggy
+    // limit=0 caller). TODO: Support signed and non-decimal integers by
+    // refactoring int64() to detect insufficient input.
+    if (!int64(result, 10, false, limit))
+        throw TexcHere(ToSBuf("cannot parse ", description));
+
+    if (atEnd())
+        throw InsufficientInput(); // more digits may be coming
+
+    return result;
 }
 

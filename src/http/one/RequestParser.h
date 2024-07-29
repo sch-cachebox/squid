@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef _SQUID_SRC_HTTP_ONE_REQUESTPARSER_H
-#define _SQUID_SRC_HTTP_ONE_REQUESTPARSER_H
+#ifndef SQUID_SRC_HTTP_ONE_REQUESTPARSER_H
+#define SQUID_SRC_HTTP_ONE_REQUESTPARSER_H
 
 #include "http/one/Parser.h"
 #include "http/RequestMethod.h"
@@ -24,19 +24,24 @@ namespace One {
  * Works on a raw character I/O buffer and tokenizes the content into
  * the major CRLF delimited segments of an HTTP/1 request message:
  *
- * \item request-line (method, URL, protocol, version)
- * \item mime-header (set of RFC2616 syntax header fields)
+ * \li request-line (method, URL, protocol, version)
+ * \li mime-header (set of RFC2616 syntax header fields)
  */
 class RequestParser : public Http1::Parser
 {
 public:
-    explicit RequestParser(bool preserveParsed = false);
-    virtual ~RequestParser() {}
+    RequestParser() = default;
+    RequestParser(bool preserveParsed) { preserveParsed_ = preserveParsed; }
+    RequestParser(const RequestParser &) = default;
+    RequestParser &operator =(const RequestParser &) = default;
+    RequestParser(RequestParser &&) = default;
+    RequestParser &operator =(RequestParser &&) = default;
+    ~RequestParser() override {}
 
     /* Http::One::Parser API */
-    virtual void clear() {*this = RequestParser();}
-    virtual Http1::Parser::size_type firstLineSize() const;
-    virtual bool parse(const SBuf &aBuf);
+    void clear() override {*this = RequestParser();}
+    Http1::Parser::size_type firstLineSize() const override;
+    bool parse(const SBuf &aBuf) override;
 
     /// the HTTP method if this is a request message
     const HttpRequestMethod & method() const {return method_;}
@@ -54,11 +59,11 @@ private:
     bool doParse(const SBuf &aBuf);
 
     /* all these return false and set parseStatusCode on parsing failures */
-    bool parseMethodField(Http1::Tokenizer &);
-    bool parseUriField(Http1::Tokenizer &);
-    bool parseHttpVersionField(Http1::Tokenizer &);
+    bool parseMethodField(Tokenizer &);
+    bool parseUriField(Tokenizer &);
+    bool parseHttpVersionField(Tokenizer &);
     bool skipDelimiter(const size_t count, const char *where);
-    bool skipTrailingCrs(Http1::Tokenizer &tok);
+    bool skipTrailingCrs(Tokenizer &tok);
 
     bool http0() const {return !msgProtocol_.major;}
     static const CharacterSet &RequestTargetCharacters();
@@ -72,11 +77,11 @@ private:
     /// all parsed bytes (i.e., input prefix consumed by parse() calls)
     /// meaningless unless preserveParsed_ is true
     SBuf parsed_;
-    bool preserveParsed_; ///< whether to accumulate parsed bytes (in parsed_)
+    bool preserveParsed_ = false; ///< whether to accumulate parsed bytes (in parsed_)
 };
 
 } // namespace One
 } // namespace Http
 
-#endif /*  _SQUID_SRC_HTTP_ONE_REQUESTPARSER_H */
+#endif /* SQUID_SRC_HTTP_ONE_REQUESTPARSER_H */
 

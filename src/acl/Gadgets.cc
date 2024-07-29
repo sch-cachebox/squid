@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -10,84 +10,73 @@
  * DEBUG: section 28    Access Control
  *
  * This file contains ACL routines that are not part of the
- * ACL class, nor any other class yet, and that need to be
+ * Acl::Node class, nor any other class yet, and that need to be
  * factored into appropriate places. They are here to reduce
- * unneeded dependencies between the ACL class and the rest
+ * unneeded dependencies between the Acl::Node class and the rest
  * of squid.
  */
 
 #include "squid.h"
-#include "acl/Acl.h"
 #include "acl/AclDenyInfoList.h"
-#include "acl/Checklist.h"
 #include "acl/Gadgets.h"
-#include "acl/Strategised.h"
 #include "acl/Tree.h"
+#include "cache_cf.h"
 #include "ConfigParser.h"
 #include "errorpage.h"
 #include "globals.h"
 #include "HttpRequest.h"
+#include "SquidConfig.h"
+#include "src/sbuf/Stream.h"
 
 #include <set>
 #include <algorithm>
 
-typedef std::set<ACL*> AclSet;
+using AclSet = std::set<Acl::Node *>;
 /// Accumulates all ACLs to facilitate their clean deletion despite reuse.
 static AclSet *RegisteredAcls; // TODO: Remove when ACLs are refcounted
 
-/* does name lookup, returns page_id */
 err_type
-aclGetDenyInfoPage(AclDenyInfoList ** head, const char *name, int redirect_allowed)
+FindDenyInfoPage(const Acl::Answer &answer, const bool redirect_allowed)
 {
-    if (!name) {
-        debugs(28, 3, "ERR_NONE due to a NULL name");
+    if (!answer.lastCheckedName) {
+        debugs(28, 3, "ERR_NONE because access was denied without evaluating ACLs");
         return ERR_NONE;
     }
 
-    AclDenyInfoList *A = NULL;
+    const auto &name = *answer.lastCheckedName;
 
-    debugs(28, 8, HERE << "got called for " << name);
-
-    for (A = *head; A; A = A->next) {
-        AclNameList *L = NULL;
-
+    for (auto A = Config.denyInfoList; A; A = A->next) {
         if (!redirect_allowed && strchr(A->err_page_name, ':') ) {
-            debugs(28, 8, HERE << "Skip '" << A->err_page_name << "' 30x redirects not allowed as response here.");
+            debugs(28, 8, "Skip '" << A->err_page_name << "' 30x redirects not allowed as response here.");
             continue;
         }
 
-        for (L = A->acl_list; L; L = L->next) {
-            if (!strcmp(name, L->name)) {
-                debugs(28, 8, HERE << "match on " << name);
+        for (const auto &aclName: A->acl_list) {
+            if (aclName.cmp(name) == 0) {
+                debugs(28, 8, "matched " << name << "; returning " << A->err_page_id << ' ' << A->err_page_name);
                 return A->err_page_id;
             }
-
         }
     }
 
-    debugs(28, 8, "aclGetDenyInfoPage: no match");
+    debugs(28, 8, "no match for " << name << (Config.denyInfoList ? "" : "; no deny_info rules"));
     return ERR_NONE;
 }
 
-/* does name lookup, returns if it is a proxy_auth acl */
-int
-aclIsProxyAuth(const char *name)
+bool
+aclIsProxyAuth(const std::optional<SBuf> &name)
 {
     if (!name) {
-        debugs(28, 3, "false due to a NULL name");
+        debugs(28, 3, "no; caller did not supply an ACL name");
         return false;
     }
 
-    debugs(28, 5, "aclIsProxyAuth: called for " << name);
-
-    ACL *a;
-
-    if ((a = ACL::FindByName(name))) {
-        debugs(28, 5, "aclIsProxyAuth: returning " << a->isProxyAuth());
+    if (const auto a = Acl::Node::FindByName(*name)) {
+        debugs(28, 5, "returning " << a->isProxyAuth() << " for ACL " << *name);
         return a->isProxyAuth();
     }
 
-    debugs(28, 3, "aclIsProxyAuth: WARNING, called for nonexistent ACL");
+    debugs(28, 3, "WARNING: Called for nonexistent ACL " << *name);
     return false;
 }
 
@@ -103,32 +92,26 @@ aclIsProxyAuth(const char *name)
 void
 aclParseDenyInfoLine(AclDenyInfoList ** head)
 {
-    char *t = NULL;
+    char *t = nullptr;
     AclDenyInfoList *B;
     AclDenyInfoList **T;
-    AclNameList *L = NULL;
-    AclNameList **Tail = NULL;
 
     /* first expect a page name */
 
-    if ((t = ConfigParser::NextToken()) == NULL) {
+    if ((t = ConfigParser::NextToken()) == nullptr) {
         debugs(28, DBG_CRITICAL, "aclParseDenyInfoLine: " << cfg_filename << " line " << config_lineno << ": " << config_input_line);
-        debugs(28, DBG_CRITICAL, "aclParseDenyInfoLine: missing 'error page' parameter.");
+        debugs(28, DBG_CRITICAL, "ERROR: aclParseDenyInfoLine: missing 'error page' parameter.");
         return;
     }
 
-    AclDenyInfoList *A = new AclDenyInfoList(t);
+    const auto A = new AclDenyInfoList(t, ConfigParser::CurrentLocation());
 
     /* next expect a list of ACL names */
-    Tail = &A->acl_list;
-
     while ((t = ConfigParser::NextToken())) {
-        L = new AclNameList(t);
-        *Tail = L;
-        Tail = &L->next;
+        A->acl_list.emplace_back(t);
     }
 
-    if (A->acl_list == NULL) {
+    if (A->acl_list.empty()) {
         debugs(28, DBG_CRITICAL, "aclParseDenyInfoLine: " << cfg_filename << " line " << config_lineno << ": " << config_input_line);
         debugs(28, DBG_CRITICAL, "aclParseDenyInfoLine: deny_info line contains no ACL's, skipping");
         delete A;
@@ -149,15 +132,15 @@ aclParseAccessLine(const char *directive, ConfigParser &, acl_access **treep)
 
     if (!t) {
         debugs(28, DBG_CRITICAL, "aclParseAccessLine: " << cfg_filename << " line " << config_lineno << ": " << config_input_line);
-        debugs(28, DBG_CRITICAL, "aclParseAccessLine: missing 'allow' or 'deny'.");
+        debugs(28, DBG_CRITICAL, "ERROR: aclParseAccessLine: missing 'allow' or 'deny'.");
         return;
     }
 
-    allow_t action = ACCESS_DUNNO;
+    auto action = Acl::Answer(ACCESS_DUNNO);
     if (!strcmp(t, "allow"))
-        action = ACCESS_ALLOWED;
+        action = Acl::Answer(ACCESS_ALLOWED);
     else if (!strcmp(t, "deny"))
-        action = ACCESS_DENIED;
+        action = Acl::Answer(ACCESS_DENIED);
     else {
         debugs(28, DBG_CRITICAL, "aclParseAccessLine: " << cfg_filename << " line " << config_lineno << ": " << config_input_line);
         debugs(28, DBG_CRITICAL, "aclParseAccessLine: expecting 'allow' or 'deny', got '" << t << "'.");
@@ -165,13 +148,9 @@ aclParseAccessLine(const char *directive, ConfigParser &, acl_access **treep)
     }
 
     const int ruleId = ((treep && *treep) ? (*treep)->childrenCount() : 0) + 1;
-    MemBuf ctxBuf;
-    ctxBuf.init();
-    ctxBuf.appendf("%s#%d", directive, ruleId);
-    ctxBuf.terminate();
 
     Acl::AndNode *rule = new Acl::AndNode;
-    rule->context(ctxBuf.content(), config_input_line);
+    rule->context(ToSBuf(directive, '#', ruleId), config_input_line);
     rule->lineParse();
     if (rule->empty()) {
         debugs(28, DBG_CRITICAL, "aclParseAccessLine: " << cfg_filename << " line " << config_lineno << ": " << config_input_line);
@@ -185,7 +164,7 @@ aclParseAccessLine(const char *directive, ConfigParser &, acl_access **treep)
     assert(treep);
     if (!*treep) {
         *treep = new Acl::Tree;
-        (*treep)->context(directive, config_input_line);
+        (*treep)->context(SBuf(directive), config_input_line);
     }
 
     (*treep)->add(rule, action);
@@ -194,39 +173,31 @@ aclParseAccessLine(const char *directive, ConfigParser &, acl_access **treep)
 }
 
 // aclParseAclList does not expect or set actions (cf. aclParseAccessLine)
-void
+size_t
 aclParseAclList(ConfigParser &, Acl::Tree **treep, const char *label)
 {
-    // accomodate callers unable to convert their ACL list context to string
+    // accommodate callers unable to convert their ACL list context to string
     if (!label)
         label = "...";
 
-    MemBuf ctxLine;
-    ctxLine.init();
-    ctxLine.appendf("(%s %s line)", cfg_directive, label);
-    ctxLine.terminate();
-
     Acl::AndNode *rule = new Acl::AndNode;
-    rule->context(ctxLine.content(), config_input_line);
-    rule->lineParse();
-
-    MemBuf ctxTree;
-    ctxTree.init();
-    ctxTree.appendf("%s %s", cfg_directive, label);
-    ctxTree.terminate();
+    rule->context(ToSBuf('(', cfg_directive, ' ', label, " line)"), config_input_line);
+    const auto aclCount = rule->lineParse();
 
     // We want a cbdata-protected Tree (despite giving it only one child node).
     Acl::Tree *tree = new Acl::Tree;
     tree->add(rule);
-    tree->context(ctxTree.content(), config_input_line);
+    tree->context(ToSBuf(cfg_directive, ' ', label), config_input_line);
 
     assert(treep);
     assert(!*treep);
     *treep = tree;
+
+    return aclCount;
 }
 
 void
-aclRegister(ACL *acl)
+aclRegister(Acl::Node *acl)
 {
     if (!acl->registered) {
         if (!RegisteredAcls)
@@ -239,7 +210,7 @@ aclRegister(ACL *acl)
 /// remove registered acl from the centralized deletion set
 static
 void
-aclDeregister(ACL *acl)
+aclDeregister(Acl::Node *acl)
 {
     if (acl->registered) {
         if (RegisteredAcls)
@@ -254,16 +225,16 @@ aclDeregister(ACL *acl)
 
 /// called to delete ALL Acls.
 void
-aclDestroyAcls(ACL ** head)
+aclDestroyAcls(Acl::Node ** head)
 {
-    *head = NULL; // Config.aclList
+    *head = nullptr; // Config.aclList
     if (AclSet *acls = RegisteredAcls) {
         debugs(28, 8, "deleting all " << acls->size() << " ACLs");
         while (!acls->empty()) {
-            ACL *acl = *acls->begin();
-            // We use centralized deletion (this function) so ~ACL should not
+            auto *acl = *acls->begin();
+            // We use centralized deletion (this function) so ~Acl::Node should not
             // delete other ACLs, but we still deregister first to prevent any
-            // accesses to the being-deleted ACL via RegisteredAcls.
+            // accesses to the being-deleted Acl::Node via RegisteredAcls.
             assert(acl->registered); // make sure we are making progress
             aclDeregister(acl);
             delete acl;
@@ -277,7 +248,7 @@ aclDestroyAclList(ACLList **list)
     debugs(28, 8, "aclDestroyAclList: invoked");
     assert(list);
     delete *list;
-    *list = NULL;
+    *list = nullptr;
 }
 
 void
@@ -287,7 +258,7 @@ aclDestroyAccessList(acl_access ** list)
     if (*list)
         debugs(28, 3, "destroying: " << *list << ' ' << (*list)->name);
     delete *list;
-    *list = NULL;
+    *list = nullptr;
 }
 
 /* maex@space.net (06.09.1996)
@@ -296,23 +267,16 @@ aclDestroyAccessList(acl_access ** list)
 void
 aclDestroyDenyInfoList(AclDenyInfoList ** list)
 {
-    AclDenyInfoList *a = NULL;
-    AclDenyInfoList *a_next = NULL;
-    AclNameList *l = NULL;
-    AclNameList *l_next = NULL;
+    AclDenyInfoList *a = nullptr;
+    AclDenyInfoList *a_next = nullptr;
 
     debugs(28, 8, "aclDestroyDenyInfoList: invoked");
 
     for (a = *list; a; a = a_next) {
-        for (l = a->acl_list; l; l = l_next) {
-            l_next = l->next;
-            safe_free(l);
-        }
-
         a_next = a->next;
         delete a;
     }
 
-    *list = NULL;
+    *list = nullptr;
 }
 

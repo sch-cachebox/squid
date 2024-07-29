@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -10,9 +10,9 @@
 
 #include "squid.h"
 #include "acl/Checklist.h"
+#include "acl/FilledChecklist.h"
 #include "acl/Tree.h"
-#include "Debug.h"
-#include "profiler/Profiler.h"
+#include "debug/Stream.h"
 
 #include <algorithm>
 
@@ -23,7 +23,7 @@ ACLChecklist::prepNonBlocking()
     assert(accessList);
 
     if (callerGone()) {
-        checkCallback(ACCESS_DUNNO); // the answer does not really matter
+        checkCallback("caller is gone"); // the answer does not really matter
         return false;
     }
 
@@ -34,8 +34,7 @@ ACLChecklist::prepNonBlocking()
 
     if (!cbdataReferenceValid(accessList)) {
         cbdataReferenceDone(accessList);
-        debugs(28, 4, "ACLChecklist::check: " << this << " accessList is invalid");
-        checkCallback(ACCESS_DUNNO);
+        checkCallback("accessList is invalid");
         return false;
     }
 
@@ -51,35 +50,36 @@ ACLChecklist::completeNonBlocking()
         calcImplicitAnswer();
 
     cbdataReferenceDone(accessList);
-    checkCallback(currentAnswer());
+    checkCallback(nullptr);
 }
 
 void
-ACLChecklist::markFinished(const allow_t &finalAnswer, const char *reason)
+ACLChecklist::markFinished(const Acl::Answer &finalAnswer, const char *reason)
 {
     assert (!finished() && !asyncInProgress());
     finished_ = true;
-    allow_ = finalAnswer;
-    debugs(28, 3, HERE << this << " answer " << allow_ << " for " << reason);
+    answer_ = finalAnswer;
+    answer_.lastCheckedName = lastCheckedName_;
+    debugs(28, 3, this << " answer " << answer_ << " for " << reason);
 }
 
 /// Called first (and once) by all checks to initialize their state
 void
 ACLChecklist::preCheck(const char *what)
 {
-    debugs(28, 3, HERE << this << " checking " << what);
+    debugs(28, 3, this << " checking " << what);
 
     // concurrent checks using the same Checklist are not supported
     assert(!occupied_);
     occupied_ = true;
     asyncLoopDepth_ = 0;
 
-    AclMatchedName = NULL;
+    lastCheckedName_.reset();
     finished_ = false;
 }
 
 bool
-ACLChecklist::matchChild(const Acl::InnerNode *current, Acl::Nodes::const_iterator pos, const ACL *child)
+ACLChecklist::matchChild(const Acl::InnerNode *current, Acl::Nodes::const_iterator pos, const Acl::Node *child)
 {
     assert(current && child);
 
@@ -112,9 +112,8 @@ ACLChecklist::matchChild(const Acl::InnerNode *current, Acl::Nodes::const_iterat
 }
 
 bool
-ACLChecklist::goAsync(AsyncState *state)
+ACLChecklist::goAsync(AsyncStarter starter, const Acl::Node &acl)
 {
-    assert(state);
     assert(!asyncInProgress());
     assert(matchLoc_.parent);
 
@@ -138,10 +137,9 @@ ACLChecklist::goAsync(AsyncState *state)
     ++asyncLoopDepth_;
 
     asyncStage_ = asyncStarting;
-    changeState(state);
-    state->checkForAsync(this); // this is supposed to go async
+    starter(*Filled(this), acl); // this is supposed to go async
 
-    // Did AsyncState object actually go async? If not, tell the caller.
+    // Did starter() actually go async? If not, tell the caller.
     if (asyncStage_ != asyncStarting) {
         assert(asyncStage_ == asyncFailed);
         asyncStage_ = asyncNone; // sanity restored
@@ -156,17 +154,20 @@ ACLChecklist::goAsync(AsyncState *state)
 // ACLFilledChecklist overwrites this to unclock something before we
 // "delete this"
 void
-ACLChecklist::checkCallback(allow_t answer)
+ACLChecklist::checkCallback(const char * const abortReason)
 {
+    if (abortReason)
+        markFinished(ACCESS_DUNNO, abortReason);
+    Assure(finished());
+
     ACLCB *callback_;
     void *cbdata_;
-    debugs(28, 3, "ACLChecklist::checkCallback: " << this << " answer=" << answer);
 
     callback_ = callback;
-    callback = NULL;
+    callback = nullptr;
 
     if (cbdataReferenceValidDone(callback_data, &cbdata_))
-        callback_(answer, cbdata_);
+        callback_(currentAnswer(), cbdata_);
 
     // not really meaningful just before delete, but here for completeness sake
     occupied_ = false;
@@ -175,15 +176,14 @@ ACLChecklist::checkCallback(allow_t answer)
 }
 
 ACLChecklist::ACLChecklist() :
-    accessList (NULL),
-    callback (NULL),
-    callback_data (NULL),
+    accessList (nullptr),
+    callback (nullptr),
+    callback_data (nullptr),
     asyncCaller_(false),
     occupied_(false),
     finished_(false),
-    allow_(ACCESS_DENIED),
+    answer_(ACCESS_DENIED),
     asyncStage_(asyncNone),
-    state_(NullState::Instance()),
     asyncLoopDepth_(0)
 {
 }
@@ -195,38 +195,6 @@ ACLChecklist::~ACLChecklist()
     changeAcl(nullptr);
 
     debugs(28, 4, "ACLChecklist::~ACLChecklist: destroyed " << this);
-}
-
-ACLChecklist::NullState *
-ACLChecklist::NullState::Instance()
-{
-    return &_instance;
-}
-
-void
-ACLChecklist::NullState::checkForAsync(ACLChecklist *) const
-{
-    assert(false); // or the Checklist will never get out of the async state
-}
-
-ACLChecklist::NullState ACLChecklist::NullState::_instance;
-
-void
-ACLChecklist::changeState (AsyncState *newState)
-{
-    /* only change from null to active and back again,
-     * not active to active.
-     * relax this once conversion to states is complete
-     * RBC 02 2003
-     */
-    assert (state_ == NullState::Instance() || newState == NullState::Instance());
-    state_ = newState;
-}
-
-ACLChecklist::AsyncState *
-ACLChecklist::asyncState() const
-{
-    return state_;
 }
 
 /**
@@ -242,12 +210,12 @@ ACLChecklist::nonBlockingCheck(ACLCB * callback_, void *callback_data_)
     callback_data = cbdataReference(callback_data_);
     asyncCaller_ = true;
 
-    /** The ACL List should NEVER be NULL when calling this method.
+    /** The ACL list should NEVER be NULL when calling this method.
      * Always caller should check for NULL and handle appropriate to its needs first.
      * We cannot select a sensible default for all callers here. */
-    if (accessList == NULL) {
+    if (accessList == nullptr) {
         debugs(28, DBG_CRITICAL, "SECURITY ERROR: ACL " << this << " checked with nothing to match against!!");
-        checkCallback(ACCESS_DUNNO);
+        checkCallback("nonBlockingCheck() without accessList");
         return;
     }
 
@@ -259,11 +227,8 @@ ACLChecklist::nonBlockingCheck(ACLCB * callback_, void *callback_data_)
 }
 
 void
-ACLChecklist::resumeNonBlockingCheck(AsyncState *state)
+ACLChecklist::resumeNonBlockingCheck()
 {
-    assert(asyncState() == state);
-    changeState(NullState::Instance());
-
     if (asyncStage_ == asyncStarting) { // oops, we did not really go async
         asyncStage_ = asyncFailed; // goAsync() checks for that
         // Do not fall through to resume checks from the async callback. Let
@@ -304,11 +269,9 @@ ACLChecklist::matchAndFinish()
         markFinished(accessList->winningAction(), "match");
 }
 
-allow_t const &
+Acl::Answer const &
 ACLChecklist::fastCheck(const Acl::Tree * list)
 {
-    PROF_start(aclCheckFast);
-
     preCheck("fast ACLs");
     asyncCaller_ = false;
 
@@ -325,31 +288,27 @@ ACLChecklist::fastCheck(const Acl::Tree * list)
 
     changeAcl(savedList);
     occupied_ = false;
-    PROF_stop(aclCheckFast);
     return currentAnswer();
 }
 
 /* Warning: do not cbdata lock this here - it
  * may be static or on the stack
  */
-allow_t const &
+Acl::Answer const &
 ACLChecklist::fastCheck()
 {
-    PROF_start(aclCheckFast);
-
     preCheck("fast rules");
     asyncCaller_ = false;
 
     debugs(28, 5, "aclCheckFast: list: " << accessList);
     const Acl::Tree *acl = cbdataReference(accessList);
-    if (acl != NULL && cbdataReferenceValid(acl)) {
+    if (acl != nullptr && cbdataReferenceValid(acl)) {
         matchAndFinish(); // calls markFinished() on success
 
         // if finished (on a match or in exceptional cases), stop
         if (finished()) {
             cbdataReferenceDone(acl);
             occupied_ = false;
-            PROF_stop(aclCheckFast);
             return currentAnswer();
         }
 
@@ -360,7 +319,6 @@ ACLChecklist::fastCheck()
     calcImplicitAnswer();
     cbdataReferenceDone(acl);
     occupied_ = false;
-    PROF_stop(aclCheckFast);
 
     return currentAnswer();
 }
@@ -370,16 +328,17 @@ ACLChecklist::fastCheck()
 void
 ACLChecklist::calcImplicitAnswer()
 {
-    const allow_t lastAction = (accessList && cbdataReferenceValid(accessList)) ?
-                               accessList->lastAction() : allow_t(ACCESS_DUNNO);
-    allow_t implicitRuleAnswer = ACCESS_DUNNO;
+    const auto lastAction = (accessList && cbdataReferenceValid(accessList)) ?
+                            accessList->lastAction() : Acl::Answer(ACCESS_DUNNO);
+    auto implicitRuleAnswer = Acl::Answer(ACCESS_DUNNO);
     if (lastAction == ACCESS_DENIED) // reverse last seen "deny"
-        implicitRuleAnswer = ACCESS_ALLOWED;
+        implicitRuleAnswer = Acl::Answer(ACCESS_ALLOWED);
     else if (lastAction == ACCESS_ALLOWED) // reverse last seen "allow"
-        implicitRuleAnswer = ACCESS_DENIED;
+        implicitRuleAnswer = Acl::Answer(ACCESS_DENIED);
     // else we saw no rules and will respond with ACCESS_DUNNO
 
-    debugs(28, 3, HERE << this << " NO match found, last action " <<
+    implicitRuleAnswer.implicit = true;
+    debugs(28, 3, this << " NO match found, last action " <<
            lastAction << " so returning " << implicitRuleAnswer);
     markFinished(implicitRuleAnswer, "implicit rule won");
 }
@@ -391,7 +350,7 @@ ACLChecklist::callerGone()
 }
 
 bool
-ACLChecklist::bannedAction(const allow_t &action) const
+ACLChecklist::bannedAction(const Acl::Answer &action) const
 {
     const bool found = std::find(bannedActions_.begin(), bannedActions_.end(), action) != bannedActions_.end();
     debugs(28, 5, "Action '" << action << "/" << action.kind << (found ? "' is " : "' is not") << " banned");
@@ -399,7 +358,7 @@ ACLChecklist::bannedAction(const allow_t &action) const
 }
 
 void
-ACLChecklist::banAction(const allow_t &action)
+ACLChecklist::banAction(const Acl::Answer &action)
 {
     bannedActions_.push_back(action);
 }

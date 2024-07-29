@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef ICMP_NET_DB_H
-#define ICMP_NET_DB_H
+#ifndef SQUID_SRC_ICMP_NET_DB_H
+#define SQUID_SRC_ICMP_NET_DB_H
 
 #include "anyp/forward.h"
 #include "hash.h"
@@ -17,6 +17,7 @@
 class CachePeer;
 class HttpRequest;
 class netdbEntry;
+class PeerSelector;
 class StoreEntry;
 
 class net_db_name:
@@ -36,7 +37,9 @@ public:
 class net_db_peer
 {
 public:
+    /// associated CachePeer::host (i.e. cache_peer hostname, not name=value!)
     const char *peername;
+
     double hops;
     double rtt;
     time_t expires;
@@ -70,7 +73,6 @@ void netdbHandlePingReply(const Ip::Address &from, int hops, int rtt);
 void netdbPingSite(const char *hostname);
 void netdbDump(StoreEntry *);
 
-void netdbFreeMemory(void);
 int netdbHostHops(const char *host);
 int netdbHostRtt(const char *host);
 void netdbUpdatePeer(const AnyP::Uri &, CachePeer *, int rtt, int hops);
@@ -80,8 +82,8 @@ void netdbBinaryExchange(StoreEntry *);
 void netdbExchangeStart(void *);
 
 void netdbExchangeUpdatePeer(Ip::Address &, CachePeer *, double, double);
-CachePeer *netdbClosestParent(HttpRequest *);
+CachePeer *netdbClosestParent(PeerSelector *);
 void netdbHostData(const char *host, int *samp, int *rtt, int *hops);
 
-#endif /* ICMP_NET_DB_H */
+#endif /* SQUID_SRC_ICMP_NET_DB_H */
 

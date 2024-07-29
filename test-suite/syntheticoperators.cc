@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -91,7 +91,7 @@ HasExplicit::Assignments(int const &newValue)
     Assignments_ = newValue;
 }
 
-void
+static void
 CheckHasExplicitWorks()
 {
     assert (HasExplicit::Instances() == 0);
@@ -123,7 +123,7 @@ public:
     HasExplicit aMember;
 };
 
-void
+static void
 CheckSyntheticWorks()
 {
     assert (HasExplicit::Instances() == 0);
@@ -151,10 +151,10 @@ CheckSyntheticWorks()
 }
 
 int
-main(int argc, char **argv)
+main(int, char *[])
 {
     CheckHasExplicitWorks();
     CheckSyntheticWorks();
-    return 0;
+    return EXIT_SUCCESS;
 }
 

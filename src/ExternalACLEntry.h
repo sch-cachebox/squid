@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -8,8 +8,8 @@
 
 /* DEBUG: section 82    External ACL */
 
-#ifndef SQUID_EXTERNALACLENTRY_H
-#define SQUID_EXTERNALACLENTRY_H
+#ifndef SQUID_SRC_EXTERNALACLENTRY_H
+#define SQUID_SRC_EXTERNALACLENTRY_H
 
 #include "acl/Acl.h"
 #include "acl/forward.h"
@@ -31,7 +31,7 @@ class ExternalACLEntryData
 public:
     ExternalACLEntryData() : result(ACCESS_DUNNO) {}
 
-    allow_t result;
+    Acl::Answer result;
 
     /// list of all kv-pairs returned by the helper
     NotePairs notes;
@@ -57,11 +57,11 @@ class ExternalACLEntry: public hash_link, public RefCountable
 
 public:
     ExternalACLEntry();
-    ~ExternalACLEntry();
+    ~ExternalACLEntry() override;
 
     void update(ExternalACLEntryData const &);
     dlink_node lru;
-    allow_t result;
+    Acl::Answer result;
     time_t date;
 
     /// list of all kv-pairs returned by the helper
@@ -77,5 +77,5 @@ public:
     external_acl *def;
 };
 
-#endif
+#endif /* SQUID_SRC_EXTERNALACLENTRY_H */
 

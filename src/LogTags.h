@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -9,12 +9,32 @@
 #ifndef SQUID_SRC_LOGTAGS_H
 #define SQUID_SRC_LOGTAGS_H
 
+#include "CollapsingHistory.h"
+
+/// Things that may happen to a transaction while it is being
+/// processed according to its LOG_* category. Logged as _SUFFIX(es).
+/// Unlike LOG_* categories, these flags may not be mutually exclusive.
+class LogTagsErrors
+{
+public:
+    /// constructs an object matching errno(3) of a failed I/O call
+    static LogTagsErrors FromErrno(int errNo);
+
+    /// Update each of this object flags to "set" if the corresponding
+    /// flag of the given object is set
+    void update(const LogTagsErrors &other);
+
+    bool ignored = false; ///< _IGNORED: the response was not used for anything
+    bool timedout = false; ///< _TIMEDOUT: terminated due to a lifetime or I/O timeout
+    bool aborted = false;  ///< _ABORTED: other abnormal termination (e.g., I/O error)
+};
+
 /** Squid transaction result code/tag set.
  *
  * These codes indicate how the request was received
  * and some details about its processing pathway.
  *
- * see also http://wiki.squid-cache.org/SquidFaq/SquidLogs#Squid_result_codes
+ * see also https://wiki.squid-cache.org/SquidFaq/SquidLogs#squid-result-codes
  * for details on particular components.
  */
 typedef enum {
@@ -36,7 +56,7 @@ typedef enum {
     LOG_TCP_DENIED_REPLY,
     LOG_TCP_OFFLINE_HIT,
     LOG_TCP_REDIRECT,
-    LOG_TCP_TUNNEL,             // a binary tunnel was established for this transaction
+    LOG_TCP_TUNNEL, ///< an attempt to establish a bidirectional TCP tunnel
     LOG_UDP_HIT,
     LOG_UDP_MISS,
     LOG_UDP_DENIED,
@@ -49,10 +69,10 @@ typedef enum {
 class LogTags
 {
 public:
-    LogTags(LogTags_ot t) : oldType(t) {assert(oldType < LOG_TYPE_MAX);}
-    // XXX: this operator does not reset flags
-    // TODO: either replace with a category-only setter or remove
-    LogTags &operator =(const LogTags_ot &t) {assert(t < LOG_TYPE_MAX); oldType = t; return *this;}
+    LogTags() = default;
+    explicit LogTags(const LogTags_ot t) { update(t); }
+
+    void update(const LogTags_ot t);
 
     /// compute the status access.log field
     const char *c_str() const;
@@ -60,17 +80,11 @@ public:
     /// determine if the log tag code indicates a cache HIT
     bool isTcpHit() const;
 
-    /// Things that may happen to a transaction while it is being
-    /// processed according to its LOG_* category. Logged as _SUFFIX(es).
-    /// Unlike LOG_* categories, these flags may not be mutually exclusive.
-    class Errors {
-    public:
-        Errors() : ignored(false), timedout(false), aborted(false) {}
+    /// \returns Cache-Status "hit" or "fwd=..." parameter (or nil)
+    const char *cacheStatusSource() const;
 
-        bool ignored; ///< _IGNORED: the response was not used for anything
-        bool timedout; ///< _TIMEDOUT: terminated due to a lifetime or I/O timeout
-        bool aborted;  ///< _ABORTED: other abnormal termination (e.g., I/O error)
-    } err;
+    /// various problems augmenting the primary log tag
+    LogTagsErrors err;
 
 private:
     /// list of string representations for LogTags_ot
@@ -78,8 +92,10 @@ private:
 
 public: // XXX: only until client_db.cc stats are redesigned.
 
-    // deprecated LogTag enum value
-    LogTags_ot oldType;
+    /// a set of client protocol, cache use, and other transaction outcome tags
+    LogTags_ot oldType = LOG_TAG_NONE;
+    /// controls CF tag presence
+    CollapsingHistory collapsingHistory;
 };
 
 /// iterator for LogTags_ot enumeration
@@ -90,5 +106,5 @@ inline LogTags_ot &operator++ (LogTags_ot &aLogType)
     return aLogType;
 }
 
-#endif
+#endif /* SQUID_SRC_LOGTAGS_H */
 

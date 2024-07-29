@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -11,6 +11,9 @@
 #include "format/Token.h"
 #include "format/TokenTableEntry.h"
 #include "globals.h"
+#include "parser/Tokenizer.h"
+#include "proxyp/Elements.h"
+#include "sbuf/Stream.h"
 #include "SquidConfig.h"
 #include "Store.h"
 
@@ -39,7 +42,7 @@ static TokenTableEntry TokenTable1C[] = {
 
     TokenTableEntry("%", LFT_PERCENT),
 
-    TokenTableEntry(NULL, LFT_NONE)        /* this must be last */
+    TokenTableEntry(nullptr, LFT_NONE)        /* this must be last */
 };
 
 /// 2-char tokens
@@ -65,6 +68,7 @@ static TokenTableEntry TokenTable2C[] = {
     TokenTableEntry("<pt", LFT_PEER_RESPONSE_TIME),
     TokenTableEntry("<tt", LFT_TOTAL_SERVER_SIDE_RESPONSE_TIME),
     TokenTableEntry("dt", LFT_DNS_WAIT_TIME),
+    TokenTableEntry("busy_time", LFT_BUSY_TIME),
 
     TokenTableEntry(">ha", LFT_ADAPTED_REQUEST_HEADER),
     TokenTableEntry(">ha", LFT_ADAPTED_REQUEST_ALL_HEADERS),
@@ -73,7 +77,6 @@ static TokenTableEntry TokenTable2C[] = {
     TokenTableEntry("ul", LFT_USER_LOGIN),
     /*TokenTableEntry( "ur", LFT_USER_REALM ), */
     /*TokenTableEntry( "us", LFT_USER_SCHEME ), */
-    TokenTableEntry("ui", LFT_USER_IDENT),
     TokenTableEntry("ue", LFT_USER_EXTERNAL),
 
     TokenTableEntry("Hs", LFT_HTTP_SENT_STATUS_CODE_OLD_30),
@@ -131,11 +134,12 @@ static TokenTableEntry TokenTable2C[] = {
     TokenTableEntry("ea", LFT_EXT_LOG),
     TokenTableEntry("sn", LFT_SEQUENCE_NUMBER),
 
-    TokenTableEntry(NULL, LFT_NONE)        /* this must be last */
+    TokenTableEntry(nullptr, LFT_NONE)        /* this must be last */
 };
 
 /// Miscellaneous >2 byte tokens
 static TokenTableEntry TokenTableMisc[] = {
+    TokenTableEntry("byte", LFT_BYTE),
     TokenTableEntry(">eui", LFT_CLIENT_EUI),
     TokenTableEntry(">qos", LFT_CLIENT_LOCAL_TOS),
     TokenTableEntry("<qos", LFT_SERVER_LOCAL_TOS),
@@ -144,8 +148,10 @@ static TokenTableEntry TokenTableMisc[] = {
     TokenTableEntry(">handshake", LFT_CLIENT_HANDSHAKE),
     TokenTableEntry("err_code", LFT_SQUID_ERROR ),
     TokenTableEntry("err_detail", LFT_SQUID_ERROR_DETAIL ),
+    TokenTableEntry("request_attempts", LFT_SQUID_REQUEST_ATTEMPTS),
     TokenTableEntry("note", LFT_NOTE ),
     TokenTableEntry("credentials", LFT_CREDENTIALS),
+    TokenTableEntry("master_xaction", LFT_MASTER_XACTION),
     /*
      * Legacy external_acl_type format tokens
      */
@@ -155,7 +161,6 @@ static TokenTableEntry TokenTableMisc[] = {
     TokenTableEntry("EXT_LOG", LFT_EXT_LOG),
     TokenTableEntry("EXT_TAG", LFT_TAG),
     TokenTableEntry("EXT_USER", LFT_USER_EXTERNAL),
-    TokenTableEntry("IDENT", LFT_USER_IDENT),
     TokenTableEntry("LOGIN", LFT_USER_LOGIN),
     TokenTableEntry("METHOD", LFT_CLIENT_REQ_METHOD),
     TokenTableEntry("MYADDR", LFT_LOCAL_LISTENING_IP),
@@ -173,7 +178,15 @@ static TokenTableEntry TokenTableMisc[] = {
     TokenTableEntry("USER_CERTCHAIN", LFT_EXT_ACL_USER_CERTCHAIN_RAW),
     TokenTableEntry("USER_CERT", LFT_EXT_ACL_USER_CERT_RAW),
 #endif
-    TokenTableEntry(NULL, LFT_NONE)        /* this must be last */
+    TokenTableEntry(nullptr, LFT_NONE)        /* this must be last */
+};
+
+static TokenTableEntry TokenTableProxyProtocol[] = {
+    TokenTableEntry(">h", LFT_PROXY_PROTOCOL_RECEIVED_HEADER),
+};
+
+static TokenTableEntry TokenTableTransport[] = {
+    TokenTableEntry(">connection_id", LFT_TRANSPORT_CLIENT_CONNECTION_ID),
 };
 
 #if USE_ADAPTATION
@@ -181,7 +194,7 @@ static TokenTableEntry TokenTableAdapt[] = {
     TokenTableEntry("all_trs", LFT_ADAPTATION_ALL_XACT_TIMES),
     TokenTableEntry("sum_trs", LFT_ADAPTATION_SUM_XACT_TIMES),
     TokenTableEntry("<last_h", LFT_ADAPTATION_LAST_HEADER),
-    TokenTableEntry(NULL, LFT_NONE)           /* this must be last */
+    TokenTableEntry(nullptr, LFT_NONE)           /* this must be last */
 };
 #endif
 
@@ -207,7 +220,7 @@ static TokenTableEntry TokenTableIcap[] = {
     TokenTableEntry("to",  LFT_ICAP_OUTCOME),
     TokenTableEntry("Hs",  LFT_ICAP_STATUS_CODE),
 
-    TokenTableEntry(NULL, LFT_NONE)           /* this must be last */
+    TokenTableEntry(nullptr, LFT_NONE)           /* this must be last */
 };
 #endif
 
@@ -221,6 +234,7 @@ static TokenTableEntry TokenTableSsl[] = {
     TokenTableEntry("<cert_subject", LFT_SSL_SERVER_CERT_SUBJECT),
     TokenTableEntry("<cert_issuer", LFT_SSL_SERVER_CERT_ISSUER),
     TokenTableEntry("<cert_errors", LFT_SSL_SERVER_CERT_ERRORS),
+    TokenTableEntry("<cert", LFT_SSL_SERVER_CERT_WHOLE),
     TokenTableEntry(">negotiated_version", LFT_TLS_CLIENT_NEGOTIATED_VERSION),
     TokenTableEntry("<negotiated_version", LFT_TLS_SERVER_NEGOTIATED_VERSION),
     TokenTableEntry(">negotiated_cipher", LFT_TLS_CLIENT_NEGOTIATED_CIPHER),
@@ -229,7 +243,7 @@ static TokenTableEntry TokenTableSsl[] = {
     TokenTableEntry("<received_hello_version", LFT_TLS_SERVER_RECEIVED_HELLO_VERSION),
     TokenTableEntry(">received_supported_version", LFT_TLS_CLIENT_SUPPORTED_VERSION),
     TokenTableEntry("<received_supported_version", LFT_TLS_SERVER_SUPPORTED_VERSION),
-    TokenTableEntry(NULL, LFT_NONE)
+    TokenTableEntry(nullptr, LFT_NONE)
 };
 #endif
 } // namespace Format
@@ -241,15 +255,17 @@ Format::Token::Init()
     // TODO standard log tokens
 
 #if USE_ADAPTATION
-    TheConfig.registerTokens(String("adapt"),::Format::TokenTableAdapt);
+    TheConfig.registerTokens(SBuf("adapt"),::Format::TokenTableAdapt);
 #endif
 #if ICAP_CLIENT
-    TheConfig.registerTokens(String("icap"),::Format::TokenTableIcap);
+    TheConfig.registerTokens(SBuf("icap"),::Format::TokenTableIcap);
 #endif
 #if USE_OPENSSL
-    TheConfig.registerTokens(String("tls"),::Format::TokenTableSsl);
-    TheConfig.registerTokens(String("ssl"),::Format::TokenTableSsl);
+    TheConfig.registerTokens(SBuf("tls"),::Format::TokenTableSsl);
+    TheConfig.registerTokens(SBuf("ssl"),::Format::TokenTableSsl);
 #endif
+    TheConfig.registerTokens(SBuf("proxy_protocol"), ::Format::TokenTableProxyProtocol);
+    TheConfig.registerTokens(SBuf("transport"), ::Format::TokenTableTransport);
 }
 
 /// Scans a token table to see if the next token exists there
@@ -257,16 +273,76 @@ Format::Token::Init()
 const char *
 Format::Token::scanForToken(TokenTableEntry const table[], const char *cur)
 {
-    for (TokenTableEntry const *lte = table; lte->configTag != NULL; ++lte) {
-        debugs(46, 8, HERE << "compare tokens '" << lte->configTag << "' with '" << cur << "'");
+    for (TokenTableEntry const *lte = table; lte->configTag != nullptr; ++lte) {
+        debugs(46, 8, "compare tokens '" << lte->configTag << "' with '" << cur << "'");
         if (strncmp(lte->configTag, cur, strlen(lte->configTag)) == 0) {
             type = lte->tokenType;
             label = lte->configTag;
-            debugs(46, 7, HERE << "Found token '" << label << "'");
+            debugs(46, 7, "Found token '" << label << "'");
             return cur + strlen(lte->configTag);
         }
     }
     return cur;
+}
+
+// TODO: Reduce code duplication across this and other custom integer parsers.
+/// interprets input as an unsigned decimal integer that fits the specified Integer type
+template <typename Integer>
+static Integer
+ParseUnsignedDecimalInteger(const char *description, const SBuf &rawInput)
+{
+    constexpr auto minValue = std::numeric_limits<Integer>::min();
+    constexpr auto maxValue = std::numeric_limits<Integer>::max();
+
+    Parser::Tokenizer tok(rawInput);
+    if (tok.skip('0')) {
+        if (!tok.atEnd()) {
+            // e.g., 077, 0xFF, 0b101, or 0.1
+            throw TextException(ToSBuf("Malformed ", description,
+                                       ": Expected a decimal integer without leading zeros but got '",
+                                       rawInput, "'"), Here());
+        }
+        // for simplicity, we currently assume that zero is always in range
+        static_assert(minValue <= 0);
+        static_assert(0 <= maxValue);
+        return Integer(0);
+    }
+    // else the value might still be zero (e.g., -0)
+
+    // check that our caller is compatible with Tokenizer::int64() use below
+    using ParsedInteger = int64_t;
+    static_assert(minValue >= std::numeric_limits<ParsedInteger>::min());
+    static_assert(maxValue <= std::numeric_limits<ParsedInteger>::max());
+
+    ParsedInteger rawValue = 0;
+    if (!tok.int64(rawValue, 10, false)) {
+        // e.g., FF, -1, or 18446744073709551616
+        // TODO: Provide better diagnostic for values exceeding int64_t maximum.
+        throw TextException(ToSBuf("Malformed ", description,
+                                   ": Expected an unsigned decimal integer but got '",
+                                   rawInput, "'"), Here());
+    }
+
+    if (!tok.atEnd()) {
+        // e.g., 1,000, 1.0, or 1e6
+        throw TextException(ToSBuf("Malformed ", description,
+                                   ": Trailing garbage after ", rawValue, " in '",
+                                   rawInput, "'"), Here());
+    }
+
+    if (rawValue > maxValue) {
+        throw TextException(ToSBuf("Malformed ", description,
+                                   ": Expected an integer value not exceeding ", maxValue,
+                                   " but got ", rawValue), Here());
+    }
+
+    if (rawValue < minValue) {
+        throw TextException(ToSBuf("Malformed ", description,
+                                   ": Expected an integer value not below ", minValue,
+                                   " but got ", rawValue), Here());
+    }
+
+    return Integer(rawValue);
 }
 
 /* parses a single token. Returns the token length in characters,
@@ -394,14 +470,14 @@ Format::Token::parse(const char *def, Quoting *quoting)
         type = LFT_NONE;
 
         // Scan each registered token namespace
-        debugs(46, 9, HERE << "check for token in " << TheConfig.tokens.size() << " namespaces.");
-        for (std::list<TokenNamespace>::const_iterator itr = TheConfig.tokens.begin(); itr != TheConfig.tokens.end(); ++itr) {
-            debugs(46, 7, HERE << "check for possible " << itr->prefix << ":: token");
-            const size_t len = itr->prefix.size();
-            if (itr->prefix.cmp(cur, len) == 0 && cur[len] == ':' && cur[len+1] == ':') {
-                debugs(46, 5, HERE << "check for " << itr->prefix << ":: token in '" << cur << "'");
+        debugs(46, 9, "check for token in " << TheConfig.tokens.size() << " namespaces.");
+        for (const auto &itr : TheConfig.tokens) {
+            debugs(46, 7, "check for possible " << itr.prefix << ":: token");
+            const size_t len = itr.prefix.length();
+            if (itr.prefix.cmp(cur, len) == 0 && cur[len] == ':' && cur[len+1] == ':') {
+                debugs(46, 5, "check for " << itr.prefix << ":: token in '" << cur << "'");
                 const char *old = cur;
-                cur = scanForToken(itr->tokenSet, cur+len+2);
+                cur = scanForToken(itr.tokenSet, cur+len+2);
                 if (old != cur) // found
                     break;
                 else // reset to start of namespace
@@ -420,23 +496,22 @@ Format::Token::parse(const char *def, Quoting *quoting)
             //     mistakes made with overlapping names. (Bug 3310)
 
             // Scan for various long tokens
-            debugs(46, 5, HERE << "scan for possible Misc token");
+            debugs(46, 5, "scan for possible Misc token");
             cur = scanForToken(TokenTableMisc, cur);
             // scan for 2-char tokens
             if (type == LFT_NONE) {
-                debugs(46, 5, HERE << "scan for possible 2C token");
+                debugs(46, 5, "scan for possible 2C token");
                 cur = scanForToken(TokenTable2C, cur);
             }
             // finally scan for 1-char tokens.
             if (type == LFT_NONE) {
-                debugs(46, 5, HERE << "scan for possible 1C token");
+                debugs(46, 5, "scan for possible 1C token");
                 cur = scanForToken(TokenTable1C, cur);
             }
         }
 
-        if (type == LFT_NONE) {
-            fatalf("Can't parse configuration token: '%s'\n", def);
-        }
+        if (type == LFT_NONE)
+            throw TexcHere(ToSBuf("Unsupported %code: '", def, "'"));
 
         // when {arg} field is after the token (old external_acl_type token syntax)
         // but accept only if there was none before the token
@@ -461,6 +536,16 @@ Format::Token::parse(const char *def, Quoting *quoting)
 
     switch (type) {
 
+    case LFT_BYTE:
+        if (!data.string)
+            throw TextException("logformat %byte requires a parameter (e.g., %byte{10})", Here());
+        // TODO: Convert Format::Token::data.string to SBuf.
+        if (const auto v = ParseUnsignedDecimalInteger<uint8_t>("logformat %byte{value}", SBuf(data.string)))
+            data.byteValue = v;
+        else
+            throw TextException("logformat %byte{n} does not support zero n values yet", Here());
+        break;
+
 #if USE_ADAPTATION
     case LFT_ADAPTATION_LAST_HEADER:
 #endif
@@ -479,9 +564,14 @@ Format::Token::parse(const char *def, Quoting *quoting)
 
     case LFT_NOTE:
 
+    case LFT_PROXY_PROTOCOL_RECEIVED_HEADER:
+
         if (data.string) {
             char *header = data.string;
-            char *cp = strchr(header, ':');
+            const auto initialType = type;
+
+            const auto pseudoHeader = header[0] == ':';
+            char *cp = strchr(pseudoHeader ? header+1 : header, ':');
 
             if (cp) {
                 *cp = '\0';
@@ -521,10 +611,21 @@ Format::Token::parse(const char *def, Quoting *quoting)
                     type = LFT_ICAP_REP_HEADER_ELEM;
                     break;
 #endif
+                case LFT_PROXY_PROTOCOL_RECEIVED_HEADER:
+                    type = LFT_PROXY_PROTOCOL_RECEIVED_HEADER_ELEM;
+                    break;
                 default:
                     break;
                 }
             }
+
+            if (!*header)
+                throw TexcHere(ToSBuf("Can't parse configuration token: '", def, "': missing header name"));
+
+            if (initialType == LFT_PROXY_PROTOCOL_RECEIVED_HEADER)
+                data.headerId = ProxyProtocol::FieldNameToFieldType(SBuf(header));
+            else if (pseudoHeader)
+                throw TexcHere(ToSBuf("Pseudo headers are not supported in this context; got: '", def, "'"));
 
             data.header.header = header;
         } else {
@@ -553,16 +654,15 @@ Format::Token::parse(const char *def, Quoting *quoting)
                 type = LFT_ICAP_REP_ALL_HEADERS;
                 break;
 #endif
+            case LFT_PROXY_PROTOCOL_RECEIVED_HEADER:
+                type = LFT_PROXY_PROTOCOL_RECEIVED_ALL_HEADERS;
+                break;
             default:
                 break;
             }
             Config.onoff.log_mime_hdrs = 1;
         }
 
-        break;
-
-    case LFT_CLIENT_FQDN:
-        Config.onoff.log_fqdn = 1;
         break;
 
     case LFT_TIME_TO_HANDLE_REQUEST:
@@ -637,7 +737,7 @@ Format::Token::parse(const char *def, Quoting *quoting)
 }
 
 Format::Token::Token() : type(LFT_NONE),
-    label(NULL),
+    label(nullptr),
     widthMin(-1),
     widthMax(-1),
     quote(LOG_QUOTE_NONE),
@@ -645,22 +745,24 @@ Format::Token::Token() : type(LFT_NONE),
     space(false),
     zero(false),
     divisor(1),
-    next(NULL)
+    next(nullptr)
 {
-    data.string = NULL;
-    data.header.header = NULL;
-    data.header.element = NULL;
+    data.string = nullptr;
+    data.header.header = nullptr;
+    data.header.element = nullptr;
     data.header.separator = ',';
+    data.headerId = ProxyProtocol::Two::htUnknown;
+    data.byteValue = 0;
 }
 
 Format::Token::~Token()
 {
-    label = NULL; // drop reference to global static.
+    label = nullptr; // drop reference to global static.
     safe_free(data.string);
     while (next) {
         Token *tokens = next;
         next = next->next;
-        tokens->next = NULL;
+        tokens->next = nullptr;
         delete tokens;
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -43,6 +43,9 @@
 #endif
 #include <sys/types.h>
 #include <sys/stat.h>
+#if HAVE_TDB_H
+#include <tdb.h>
+#endif
 #if HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -57,11 +60,41 @@
 
 static int session_ttl = 3600;
 static int fixed_timeout = 0;
-char *db_path = NULL;
+char *db_path = nullptr;
 const char *program_name;
 
-DB *db = NULL;
-DB_ENV *db_env = NULL;
+#if USE_BERKLEYDB
+DB *db = nullptr;
+DB_ENV *db_env = nullptr;
+typedef DBT DB_ENTRY;
+
+#elif HAVE_LIBTDB
+TDB_CONTEXT *db = nullptr;
+typedef TDB_DATA DB_ENTRY;
+
+#else
+#error "Either Berkeley DB or Trivial DB must be available"
+#endif
+
+static void
+shutdown_db()
+{
+    if (db) {
+#if USE_BERKLEYDB
+        db->close(db, 0);
+    }
+    if (db_env) {
+        db_env->close(db_env, 0);
+
+#elif HAVE_LIBTDB
+        if (tdb_close(db) != 0) {
+            fprintf(stderr, "%s| WARNING: error closing session db '%s'\n", program_name, db_path);
+            exit(EXIT_FAILURE);
+        }
+#endif
+    }
+    xfree(db_path);
+}
 
 static void init_db(void)
 {
@@ -70,83 +103,161 @@ static void init_db(void)
     if (db_path) {
         if (!stat(db_path, &st_buf)) {
             if (S_ISDIR (st_buf.st_mode)) {
+#if USE_BERKLEYDB
                 /* If directory then open database environment. This prevents sync problems
                     between different processes. Otherwise fallback to single file */
                 db_env_create(&db_env, 0);
-                if (db_env->open(db_env, db_path, DB_CREATE | DB_INIT_MPOOL | DB_INIT_LOCK , 0666)) {
+                if (db_env->open(db_env, db_path, DB_CREATE | DB_INIT_MPOOL | DB_INIT_LOCK, 0666)) {
                     fprintf(stderr, "FATAL: %s: Failed to open database environment in '%s'\n", program_name, db_path);
                     db_env->close(db_env, 0);
-                    exit(1);
+                    exit(EXIT_FAILURE);
                 }
                 db_create(&db, db_env, 0);
+#elif HAVE_LIBTDB
+                std::string newPath(db_path);
+                newPath.append("session", 7);
+                db_path = xstrdup(newPath.c_str());
+#endif
             }
         }
     }
 
+#if USE_BERKLEYDB
     if (db_env) {
-        if (db->open(db, NULL, "session", NULL, DB_BTREE, DB_CREATE, 0666)) {
+        if (db->open(db, nullptr, "session", nullptr, DB_BTREE, DB_CREATE, 0666)) {
             fprintf(stderr, "FATAL: %s: Failed to open db file '%s' in dir '%s'\n",
                     program_name, "session", db_path);
             db_env->close(db_env, 0);
-            exit(1);
+            exit(EXIT_FAILURE);
         }
     } else {
-        db_create(&db, NULL, 0);
-        if (db->open(db, NULL, db_path, NULL, DB_BTREE, DB_CREATE, 0666)) {
-            fprintf(stderr, "FATAL: %s: Failed to open session db '%s'\n", program_name, db_path);
-            exit(1);
+        db_create(&db, nullptr, 0);
+        if (db->open(db, nullptr, db_path, nullptr, DB_BTREE, DB_CREATE, 0666)) {
+            db = nullptr;
         }
     }
-}
-
-static void shutdown_db(void)
-{
-    db->close(db, 0);
-    if (db_env) {
-        db_env->close(db_env, 0);
+#elif HAVE_LIBTDB
+#if _SQUID_FREEBSD_ && !defined(O_DSYNC)
+    // FreeBSD lacks O_DSYNC, O_SYNC is closest to correct behaviour
+#define O_DSYNC O_SYNC
+#endif
+    db = tdb_open(db_path, 0, TDB_CLEAR_IF_FIRST, O_CREAT|O_DSYNC, 0666);
+#endif
+    if (!db) {
+        fprintf(stderr, "FATAL: %s: Failed to open session db '%s'\n", program_name, db_path);
+        shutdown_db();
+        exit(EXIT_FAILURE);
     }
 }
 
 int session_is_active = 0;
 
+static size_t
+dataSize(DB_ENTRY *data)
+{
+#if USE_BERKLEYDB
+    return data->size;
+#elif HAVE_LIBTDB
+    return data->dsize;
+#endif
+}
+
+static bool
+fetchKey(/*const*/ DB_ENTRY &key, DB_ENTRY *data)
+{
+#if USE_BERKLEYDB
+    return (db->get(db, nullptr, &key, data, 0) == 0);
+#elif HAVE_LIBTDB
+    // NP: API says returns NULL on errors, but return is a struct type WTF??
+    *data = tdb_fetch(db, key);
+    return (data->dptr != nullptr);
+#endif
+}
+
+static void
+deleteEntry(/*const*/ DB_ENTRY &key)
+{
+#if USE_BERKLEYDB
+    db->del(db, nullptr, &key, 0);
+#elif HAVE_LIBTDB
+    tdb_delete(db, key);
+#endif
+}
+
+static void
+copyValue(void *dst, const DB_ENTRY *src, size_t sz)
+{
+#if USE_BERKLEYDB
+    memcpy(dst, src->data, sz);
+#elif HAVE_LIBTDB
+    memcpy(dst, src->dptr, sz);
+#endif
+}
+
 static int session_active(const char *details, size_t len)
 {
-    DBT key = {0};
-    DBT data = {0};
-    key.data = (void *)details;
+#if USE_BERKLEYDB
+    DBT key = {};
+    key.data = const_cast<char*>(details);
     key.size = len;
-    if (db->get(db, NULL, &key, &data, 0) == 0) {
+
+    DBT data = {};
+#elif HAVE_LIBTDB
+    TDB_DATA key = {};
+    key.dptr = reinterpret_cast<decltype(key.dptr)>(const_cast<char*>(details));
+    key.dsize = len;
+
+    TDB_DATA data = {};
+#else
+    (void)len;
+#endif
+    if (fetchKey(key, &data)) {
         time_t timestamp;
-        if (data.size != sizeof(timestamp)) {
+        if (dataSize(&data) != sizeof(timestamp)) {
             fprintf(stderr, "ERROR: %s: CORRUPTED DATABASE (%s)\n", program_name, details);
-            db->del(db, NULL, &key, 0);
+            deleteEntry(key);
             return 0;
         }
-        memcpy(&timestamp, data.data, sizeof(timestamp));
-        if (timestamp + session_ttl >= time(NULL))
+        copyValue(&timestamp, &data, sizeof(timestamp));
+        if (timestamp + session_ttl >= time(nullptr))
             return 1;
     }
     return 0;
 }
 
-static void session_login(const char *details, size_t len)
+static void
+session_login(/*const*/ char *details, size_t len)
 {
-    DBT key = {0};
-    DBT data = {0};
-    key.data = (void *)details;
+    DB_ENTRY key = {};
+    DB_ENTRY data = {};
+    time_t now = time(nullptr);
+#if USE_BERKLEYDB
+    key.data = static_cast<decltype(key.data)>(details);
     key.size = len;
-    time_t now = time(NULL);
     data.data = &now;
     data.size = sizeof(now);
-    db->put(db, NULL, &key, &data, 0);
+    db->put(db, nullptr, &key, &data, 0);
+#elif HAVE_LIBTDB
+    key.dptr = reinterpret_cast<decltype(key.dptr)>(details);
+    key.dsize = len;
+    data.dptr = reinterpret_cast<decltype(data.dptr)>(&now);
+    data.dsize = sizeof(now);
+    tdb_store(db, key, data, 0);
+#endif
 }
 
-static void session_logout(const char *details, size_t len)
+static void
+session_logout(/*const*/ char *details, size_t len)
 {
-    DBT key = {0};
-    key.data = (void *)details;
+    DB_ENTRY key = {};
+#if USE_BERKLEYDB
+    key.data = static_cast<decltype(key.data)>(details);
     key.size = len;
-    db->del(db, NULL, &key, 0);
+#elif HAVE_LIBTDB
+    key.dptr = reinterpret_cast<decltype(key.dptr)>(details);
+    key.dsize = len;
+#endif
+    deleteEntry(key);
 }
 
 static void usage(void)
@@ -169,35 +280,36 @@ int main(int argc, char **argv)
         switch (opt) {
         case 'T':
             fixed_timeout = 1;
+            [[fallthrough]];
         case 't':
-            session_ttl = strtol(optarg, NULL, 0);
+            session_ttl = strtol(optarg, nullptr, 0);
             break;
         case 'b':
-            db_path = optarg;
+            db_path = xstrdup(optarg);
             break;
         case 'a':
             default_action = 0;
             break;
         case '?':
             usage();
-            exit(0);
+            exit(EXIT_SUCCESS);
             break;
         }
     }
 
-    setbuf(stdout, NULL);
+    setbuf(stdout, nullptr);
 
     init_db();
 
     while (fgets(request, HELPER_INPUT_BUFFER, stdin)) {
         int action = 0;
         const char *channel_id = strtok(request, " ");
-        char *detail = strtok(NULL, "\n");
-        if (detail == NULL) {
-            // Only 1 paramater supplied. We are expecting at least 2 (including the channel ID)
+        char *detail = strtok(nullptr, "\n");
+        if (detail == nullptr) {
+            // Only 1 parameter supplied. We are expecting at least 2 (including the channel ID)
             fprintf(stderr, "FATAL: %s is concurrent and requires the concurrency option to be specified.\n", program_name);
             shutdown_db();
-            exit(1);
+            exit(EXIT_FAILURE);
         }
         char *lastdetail = strrchr(detail, ' ');
         size_t detail_len = strlen(detail);
@@ -236,6 +348,6 @@ int main(int argc, char **argv)
         }
     }
     shutdown_db();
-    return 0;
+    return EXIT_SUCCESS;
 }
 

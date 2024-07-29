@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -41,26 +41,26 @@ main(int argc, char **argv)
     char *user, *passwd, *p;
     char *nispasswd;
 
-    setbuf(stdout, NULL);
+    setbuf(stdout, nullptr);
 
     if (argc != 3) {
         fprintf(stderr, "Usage: basic_nis_auth <domainname> <nis map for password>\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "Example basic_nis_auth mydomain.com passwd.byname\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     nisdomain = argv[1];
     nismap = argv[2];
 
-    while (fgets(buf, 256, stdin) != NULL) {
-        if ((p = strchr(buf, '\n')) != NULL)
+    while (fgets(buf, 256, stdin) != nullptr) {
+        if ((p = strchr(buf, '\n')) != nullptr)
             *p = '\0';      /* strip \n */
 
-        if ((user = strtok(buf, " ")) == NULL) {
+        if ((user = strtok(buf, " ")) == nullptr) {
             printf("ERR\n");
             continue;
         }
-        if ((passwd = strtok(NULL, "")) == NULL) {
+        if ((passwd = strtok(nullptr, "")) == nullptr) {
             printf("ERR\n");
             continue;
         }
@@ -77,7 +77,7 @@ main(int argc, char **argv)
         }
 
 #if HAVE_CRYPT
-        char *crypted = NULL;
+        char *crypted = nullptr;
         if ((crypted = crypt(passwd, nispasswd)) && strcmp(nispasswd, crypted) == 0) {
             /* All ok !, thanks... */
             printf("OK\n");
@@ -90,6 +90,6 @@ main(int argc, char **argv)
         printf("BH message=\"Missing crypto capability\"\n");
 #endif
     }
-    exit(0);
+    return EXIT_SUCCESS;
 }
 

@@ -1,17 +1,18 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_AUTH_USER_H
-#define SQUID_AUTH_USER_H
+#ifndef SQUID_SRC_AUTH_USER_H
+#define SQUID_SRC_AUTH_USER_H
 
 #if USE_AUTH
 
 #include "auth/CredentialState.h"
+#include "auth/forward.h"
 #include "auth/Type.h"
 #include "base/CbcPointer.h"
 #include "base/RefCount.h"
@@ -24,9 +25,6 @@ class StoreEntry;
 
 namespace Auth
 {
-
-class Config;
-class CredentialsCache;
 
 /**
  * This is the main user related structure. It stores user-related data,
@@ -41,15 +39,15 @@ public:
     typedef RefCount<User> Pointer;
 
 protected:
-    User(Auth::Config *, const char *requestRealm);
+    User(Auth::SchemeConfig *, const char *requestRealm);
 public:
-    virtual ~User();
+    ~User() override;
 
     /* extra fields for proxy_auth */
     /** \deprecated this determines what scheme owns the user data. */
     Auth::Type auth_type;
     /** the config for this user */
-    Auth::Config *config;
+    Auth::SchemeConfig *config;
     dlink_list proxy_match_cache;
     size_t ipcount;
     long expiretime;
@@ -126,5 +124,5 @@ private:
 } // namespace Auth
 
 #endif /* USE_AUTH */
-#endif /* SQUID_AUTH_USER_H */
+#endif /* SQUID_SRC_AUTH_USER_H */
 

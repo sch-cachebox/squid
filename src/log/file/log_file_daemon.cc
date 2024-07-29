@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -101,16 +101,16 @@ main(int argc, char *argv[])
 
     if (argc < 2) {
         printf("Error: usage: %s <logfile>\n", argv[0]);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     fp = fopen(argv[1], "a");
-    if (fp == NULL) {
+    if (fp == nullptr) {
         perror("fopen");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
-    setbuf(stdout, NULL);
+    setbuf(stdout, nullptr);
     /* XXX stderr should not be closed, but in order to support squid must be
-     * able to collect and manage modules's stderr first.
+     * able to collect and manage modules' stderr first.
      */
     close(2);
     t = open(_PATH_DEVNULL, O_RDWR);
@@ -135,14 +135,14 @@ main(int argc, char *argv[])
                         fclose(fp);
                         rotate(argv[1], rotate_count);
                         fp = fopen(argv[1], "a");
-                        if (fp == NULL) {
+                        if (fp == nullptr) {
                             perror("fopen");
-                            exit(1);
+                            exit(EXIT_FAILURE);
                         }
                         fprintf(fp, "%s", buf + 1);
                     } else {
                         perror("fprintf");
-                        exit(1);
+                        exit(EXIT_FAILURE);
                     }
                 }
             }
@@ -153,9 +153,9 @@ main(int argc, char *argv[])
             fclose(fp);
             rotate(argv[1], rotate_count);
             fp = fopen(argv[1], "a");
-            if (fp == NULL) {
+            if (fp == nullptr) {
                 perror("fopen");
-                exit(1);
+                exit(EXIT_FAILURE);
             }
             break;
         case 'T':
@@ -180,7 +180,7 @@ main(int argc, char *argv[])
         }
     }
     fclose(fp);
-    fp = NULL;
-    exit(0);
+    fp = nullptr;
+    return EXIT_SUCCESS;
 }
 

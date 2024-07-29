@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -126,7 +126,7 @@ typedef WINLDAPAPI ULONG(LDAPAPI * PFldap_start_tls_s) (IN PLDAP, OUT PULONG, OU
 typedef WINLDAPAPI ULONG(LDAPAPI * PFldap_start_tls_s) (IN PLDAP, OUT PULONG, OUT LDAPMessage **, IN PLDAPControlA *, IN PLDAPControlA *);
 #endif /* LDAP_UNICODE */
 PFldap_start_tls_s Win32_ldap_start_tls_s;
-#define ldap_start_tls_s(l,s,c) Win32_ldap_start_tls_s(l,NULL,NULL,s,c)
+#define ldap_start_tls_s(l,s,c) Win32_ldap_start_tls_s(l, nullptr, nullptr,s,c)
 #endif /* LDAP_VERSION3 */
 
 #else
@@ -134,24 +134,28 @@ PFldap_start_tls_s Win32_ldap_start_tls_s;
 #include <lber.h>
 #include <ldap.h>
 
+#ifndef LDAP_SECURITY_ERROR
+#define LDAP_SECURITY_ERROR(err) (0x2f <= (err) && (err) <= 0x32) // [47, 50]
+#endif
+
 #endif
 
 #define PROGRAM_NAME "basic_ldap_auth"
 
 /* Global options */
 static const char *basedn;
-static const char *searchfilter = NULL;
-static const char *binddn = NULL;
-static const char *bindpasswd = NULL;
+static const char *searchfilter = nullptr;
+static const char *binddn = nullptr;
+static const char *bindpasswd = nullptr;
 static const char *userattr = "uid";
-static const char *passwdattr = NULL;
+static const char *passwdattr = nullptr;
 static int searchscope = LDAP_SCOPE_SUBTREE;
 static int persistent = 0;
 static int bind_once = 0;
 static int noreferrals = 0;
 static int aliasderef = LDAP_DEREF_NEVER;
 #if defined(NETSCAPE_SSL)
-static const char *sslpath = NULL;
+static const char *sslpath = nullptr;
 static int sslinit = 0;
 #endif
 static int connect_timeout = 0;
@@ -259,36 +263,36 @@ squid_ldap_memfree(char *p)
 static LDAP *
 open_ldap_connection(const char *ldapServer, int port)
 {
-    LDAP *ld = NULL;
+    LDAP *ld = nullptr;
 #if HAS_URI_SUPPORT
-    if (strstr(ldapServer, "://") != NULL) {
+    if (strstr(ldapServer, "://") != nullptr) {
         int rc = ldap_initialize(&ld, ldapServer);
         if (rc != LDAP_SUCCESS) {
             fprintf(stderr, "\nUnable to connect to LDAPURI:%s\n", ldapServer);
-            exit(1);
+            exit(EXIT_FAILURE);
         }
     } else
 #endif
 #if NETSCAPE_SSL
         if (sslpath) {
-            if (!sslinit && (ldapssl_client_init(sslpath, NULL) != LDAP_SUCCESS)) {
+            if (!sslinit && (ldapssl_client_init(sslpath, nullptr) != LDAP_SUCCESS)) {
                 fprintf(stderr, "\nUnable to initialise SSL with cert path %s\n",
                         sslpath);
-                exit(1);
+                exit(EXIT_FAILURE);
             } else {
                 ++sslinit;
             }
             if ((ld = ldapssl_init(ldapServer, port, 1)) == NULL) {
                 fprintf(stderr, "\nUnable to connect to SSL LDAP server: %s port:%d\n",
                         ldapServer, port);
-                exit(1);
+                exit(EXIT_FAILURE);
             }
         } else
 #endif
-            if ((ld = ldap_init(ldapServer, port)) == NULL) {
+            if ((ld = ldap_init(ldapServer, port)) == nullptr) {
                 fprintf(stderr, "\nUnable to connect to LDAP server:%s port:%d\n",
                         ldapServer, port);
-                exit(1);
+                exit(EXIT_FAILURE);
             }
     if (connect_timeout)
         squid_ldap_set_connect_timeout(ld, connect_timeout);
@@ -300,20 +304,20 @@ open_ldap_connection(const char *ldapServer, int port)
     if (ldap_set_option(ld, LDAP_OPT_PROTOCOL_VERSION, &version) != LDAP_SUCCESS) {
         fprintf(stderr, "Could not set LDAP_OPT_PROTOCOL_VERSION %d\n",
                 version);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     if (use_tls) {
 #ifdef LDAP_OPT_X_TLS
         if (version != LDAP_VERSION3) {
             fprintf(stderr, "TLS requires LDAP version 3\n");
-            exit(1);
-        } else if (ldap_start_tls_s(ld, NULL, NULL) != LDAP_SUCCESS) {
+            exit(EXIT_FAILURE);
+        } else if (ldap_start_tls_s(ld, nullptr, nullptr) != LDAP_SUCCESS) {
             fprintf(stderr, "Could not Activate TLS connection\n");
-            exit(1);
+            exit(EXIT_FAILURE);
         }
 #else
         fprintf(stderr, "TLS not supported with your LDAP library\n");
-        exit(1);
+        exit(EXIT_FAILURE);
 #endif
     }
 #endif
@@ -354,12 +358,12 @@ main(int argc, char **argv)
 {
     char buf[1024];
     char *user, *passwd;
-    char *ldapServer = NULL;
-    LDAP *ld = NULL;
+    char *ldapServer = nullptr;
+    LDAP *ld = nullptr;
     int tryagain;
     int port = LDAP_PORT;
 
-    setbuf(stdout, NULL);
+    setbuf(stdout, nullptr);
 
     while (argc > 1 && argv[1][0] == '-') {
         const char *value = "";
@@ -389,7 +393,7 @@ main(int argc, char **argv)
         case 'H':
 #if !HAS_URI_SUPPORT
             fprintf(stderr, "ERROR: Your LDAP library does not have URI support\n");
-            exit(1);
+            exit(EXIT_FAILURE);
 #endif
         /* Fall thru to -h */
         case 'h':
@@ -424,7 +428,7 @@ main(int argc, char **argv)
                 searchscope = LDAP_SCOPE_SUBTREE;
             else {
                 fprintf(stderr, PROGRAM_NAME ": ERROR: Unknown search scope '%s'\n", value);
-                exit(1);
+                exit(EXIT_FAILURE);
             }
             break;
         case 'E':
@@ -434,7 +438,7 @@ main(int argc, char **argv)
                 port = LDAPS_PORT;
 #else
             fprintf(stderr, PROGRAM_NAME " ERROR: -E unsupported with this LDAP library\n");
-            exit(1);
+            exit(EXIT_FAILURE);
 #endif
             break;
         case 'c':
@@ -454,7 +458,7 @@ main(int argc, char **argv)
                 aliasderef = LDAP_DEREF_FINDING;
             else {
                 fprintf(stderr, PROGRAM_NAME ": ERROR: Unknown alias dereference method '%s'\n", value);
-                exit(1);
+                exit(EXIT_FAILURE);
             }
             break;
         case 'D':
@@ -489,14 +493,14 @@ main(int argc, char **argv)
                 break;
             default:
                 fprintf(stderr, "Protocol version should be 2 or 3\n");
-                exit(1);
+                exit(EXIT_FAILURE);
             }
             break;
         case 'Z':
             if (version == LDAP_VERSION2) {
                 fprintf(stderr, "TLS (-Z) is incompatible with version %d\n",
                         version);
-                exit(1);
+                exit(EXIT_FAILURE);
             }
             version = LDAP_VERSION3;
             use_tls = 1;
@@ -507,7 +511,7 @@ main(int argc, char **argv)
             break;
         default:
             fprintf(stderr, PROGRAM_NAME ": ERROR: Unknown command line option '%c'\n", option);
-            exit(1);
+            exit(EXIT_FAILURE);
         }
     }
 
@@ -558,7 +562,7 @@ main(int argc, char **argv)
         fprintf(stderr, "\n");
         fprintf(stderr, "\tIf no search filter is specified, then the dn <userattr>=user,basedn\n\twill be used (same as specifying a search filter of '<userattr>=',\n\tbut quicker as as there is no need to search for the user DN)\n\n");
         fprintf(stderr, "\tIf you need to bind as a user to perform searches then use the\n\t-D binddn -w bindpasswd or -D binddn -W secretfile options\n\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     /* On Windows ldap_start_tls_s is available starting from Windows XP,
      * so we need to bind at run-time with the function entry point
@@ -571,14 +575,14 @@ main(int argc, char **argv)
         WLDAP32Handle = GetModuleHandle("wldap32");
         if ((Win32_ldap_start_tls_s = (PFldap_start_tls_s) GetProcAddress(WLDAP32Handle, LDAP_START_TLS_S)) == NULL) {
             fprintf(stderr, PROGRAM_NAME ": ERROR: TLS (-Z) not supported on this platform.\n");
-            exit(1);
+            exit(EXIT_FAILURE);
         }
     }
 #endif
 
-    while (fgets(buf, sizeof(buf), stdin) != NULL) {
+    while (fgets(buf, sizeof(buf), stdin) != nullptr) {
         user = strtok(buf, " \r\n");
-        passwd = strtok(NULL, "\r\n");
+        passwd = strtok(nullptr, "\r\n");
 
         if (!user) {
             SEND_ERR(HLP_MSG("Missing username"));
@@ -594,16 +598,16 @@ main(int argc, char **argv)
             SEND_ERR(HLP_MSG("Invalid username"));
             continue;
         }
-        tryagain = (ld != NULL);
+        tryagain = (ld != nullptr);
 recover:
-        if (ld == NULL && persistent)
+        if (ld == nullptr && persistent)
             ld = open_ldap_connection(ldapServer, port);
         if (checkLDAP(ld, user, passwd, ldapServer, port) != 0) {
             const auto e = squid_ldap_errno(ld);
             if (tryagain && e != LDAP_INVALID_CREDENTIALS) {
                 tryagain = 0;
                 ldap_unbind(ld);
-                ld = NULL;
+                ld = nullptr;
                 goto recover;
             }
             if (LDAP_SECURITY_ERROR(e))
@@ -615,12 +619,12 @@ recover:
         }
         if (ld && (squid_ldap_errno(ld) != LDAP_SUCCESS && squid_ldap_errno(ld) != LDAP_INVALID_CREDENTIALS)) {
             ldap_unbind(ld);
-            ld = NULL;
+            ld = nullptr;
         }
     }
     if (ld)
         ldap_unbind(ld);
-    return 0;
+    return EXIT_SUCCESS;
 }
 
 static int
@@ -663,7 +667,7 @@ checkLDAP(LDAP * persistent_ld, const char *userid, const char *password, const 
 {
     char dn[1024];
     int ret = 0;
-    LDAP *bind_ld = NULL;
+    LDAP *bind_ld = nullptr;
 
     if (!*password) {
         /* LDAP can't bind with a blank password. Seen as "anonymous"
@@ -675,9 +679,9 @@ checkLDAP(LDAP * persistent_ld, const char *userid, const char *password, const 
     if (searchfilter) {
         char filter[16384];
         char escaped_login[1024];
-        LDAPMessage *res = NULL;
+        LDAPMessage *res = nullptr;
         LDAPMessage *entry;
-        char *searchattr[] = {(char *)LDAP_NO_ATTRS, NULL};
+        char *searchattr[] = {(char *)LDAP_NO_ATTRS, nullptr};
         char *userdn;
         int rc;
         LDAP *search_ld = persistent_ld;
@@ -733,16 +737,16 @@ checkLDAP(LDAP * persistent_ld, const char *userid, const char *password, const 
         if (ret == 0 && (!binddn || !bind_once || passwdattr)) {
             /* Reuse the search connection for comparing the user password attribute */
             bind_ld = search_ld;
-            search_ld = NULL;
+            search_ld = nullptr;
         }
 search_done:
         if (res) {
             ldap_msgfree(res);
-            res = NULL;
+            res = nullptr;
         }
         if (search_ld && search_ld != persistent_ld) {
             ldap_unbind(search_ld);
-            search_ld = NULL;
+            search_ld = nullptr;
         }
         if (ret != 0)
             return ret;
@@ -763,7 +767,7 @@ search_done:
         ret = 1;
     if (bind_ld != persistent_ld) {
         ldap_unbind(bind_ld);
-        bind_ld = NULL;
+        bind_ld = nullptr;
     }
     return ret;
 }
@@ -772,9 +776,9 @@ int
 readSecret(const char *filename)
 {
     char buf[BUFSIZ];
-    char *e = NULL;
+    char *e = nullptr;
     FILE *f;
-    char *passwd = NULL;
+    char *passwd = nullptr;
 
     if (!(f = fopen(filename, "r"))) {
         fprintf(stderr, PROGRAM_NAME " ERROR: Can not read secret file %s\n", filename);
@@ -791,10 +795,10 @@ readSecret(const char *filename)
     if ((e = strrchr(buf, '\r')))
         *e = 0;
 
-    passwd = (char *) calloc(sizeof(char), strlen(buf) + 1);
+    passwd = static_cast<char *>(calloc(strlen(buf) + 1, sizeof(char)));
     if (!passwd) {
         fprintf(stderr, PROGRAM_NAME " ERROR: can not allocate memory\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     strcpy(passwd, buf);
     bindpasswd = passwd;

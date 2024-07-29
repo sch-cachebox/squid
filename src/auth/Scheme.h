@@ -1,37 +1,26 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_AUTH_SCHEME_H
-#define SQUID_AUTH_SCHEME_H
+#ifndef SQUID_SRC_AUTH_SCHEME_H
+#define SQUID_SRC_AUTH_SCHEME_H
 
 #if USE_AUTH
 
+#include "auth/forward.h"
 #include "base/RefCount.h"
-
-#include <vector>
-
-/**
- \defgroup AuthSchemeAPI    Authentication Scheme API
- \ingroup AuthAPI
- */
 
 namespace Auth
 {
 
-class Config;
-
 /**
- * \ingroup AuthAPI
- * \ingroup AuthSchemeAPI
- * \par
  * I represent an authentication scheme. For now my children
  * store the scheme metadata.
- * \par
+ *
  * Should we need multiple configs of a single scheme,
  * a new class should be made, and the config specific calls on Auth::Scheme moved to it.
  */
@@ -44,7 +33,7 @@ public:
 
 public:
     Scheme() : initialised (false) {};
-    virtual ~Scheme() {};
+    ~Scheme() override {};
 
     static void AddScheme(Scheme::Pointer);
 
@@ -66,7 +55,7 @@ public:
     /* per scheme methods */
     virtual char const *type() const = 0;
     virtual void shutdownCleanup() = 0;
-    virtual Auth::Config *createConfig() = 0;
+    virtual Auth::SchemeConfig *createConfig() = 0;
 
     // Not implemented
     Scheme(Scheme const &);
@@ -84,5 +73,5 @@ private:
 } // namespace Auth
 
 #endif /* USE_AUTH */
-#endif /* SQUID_AUTH_SCHEME_H */
+#endif /* SQUID_SRC_AUTH_SCHEME_H */
 

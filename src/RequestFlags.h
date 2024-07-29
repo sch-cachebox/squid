@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -8,8 +8,10 @@
 
 /* DEBUG: section 73    HTTP Request */
 
-#ifndef SQUID_REQUESTFLAGS_H_
-#define SQUID_REQUESTFLAGS_H_
+#ifndef SQUID_SRC_REQUESTFLAGS_H
+#define SQUID_SRC_REQUESTFLAGS_H
+
+#include "base/SupportOrVeto.h"
 
 /** request-related flags
  *
@@ -28,16 +30,16 @@ public:
     bool auth = false;
     /** do not use keytabs for peer Kerberos authentication */
     bool auth_no_keytab = false;
-    /** he response to the request may be stored in the cache */
-    bool cachable = false;
+
+    /// whether the response may be stored in the cache
+    SupportOrVeto cachable;
+
     /** the request can be forwarded through the hierarchy */
     bool hierarchical = false;
     /** a loop was detected on this request */
     bool loopDetected = false;
     /** the connection can be kept alive */
     bool proxyKeepalive = false;
-    /* this should be killed, also in httpstateflags */
-    bool proxying = false;
     /** content has expired, need to refresh it */
     bool refresh = false;
     /** request was redirected by redirectors */
@@ -70,11 +72,16 @@ public:
     /// This applies to TPROXY traffic that has not had spoofing disabled through
     /// the spoof_client_ip squid.conf ACL.
     bool spoofClientIp = false;
-    /** set if the request is internal (\see ClientHttpRequest::flags.internal)*/
+
+    /// whether the request targets a /squid-internal- resource (e.g., a MIME
+    /// icon or a cache manager page) served by this Squid instance
+    /// TODO: Rename to avoid a false implication that this flag is true for
+    /// requests for /squid-internal- resources served by other Squid instances.
     bool internal = false;
+
     /** if set, request to try very hard to keep the connection alive */
     bool mustKeepalive = false;
-    /** set if the rquest wants connection oriented auth */
+    /** set if the request wants connection oriented auth */
     bool connectionAuth = false;
     /** set if connection oriented auth can not be supported */
     bool connectionAuthDisabled = false;
@@ -85,7 +92,7 @@ public:
     bool pinned = false;
     /** Authentication was already sent upstream (e.g. due tcp-level auth) */
     bool authSent = false;
-    /** Deny direct forwarding unless overriden by always_direct
+    /** Deny direct forwarding unless overridden by always_direct
      * Used in accelerator mode */
     bool noDirect = false;
     /** Reply with chunked transfer encoding */
@@ -126,7 +133,12 @@ public:
     bool noCacheHack() const {
         return USE_HTTP_VIOLATIONS && nocacheHack;
     }
+
+    /// ban satisfying the request from the cache and ban storing the response
+    /// in the cache
+    /// \param reason summarizes the marking decision context (for debugging)
+    void disableCacheUse(const char *reason);
 };
 
-#endif /* SQUID_REQUESTFLAGS_H_ */
+#endif /* SQUID_SRC_REQUESTFLAGS_H */
 

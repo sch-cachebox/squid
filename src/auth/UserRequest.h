@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_AUTH_USERREQUEST_H
-#define SQUID_AUTH_USERREQUEST_H
+#ifndef SQUID_SRC_AUTH_USERREQUEST_H
+#define SQUID_SRC_AUTH_USERREQUEST_H
 
 #if USE_AUTH
 
@@ -80,7 +80,7 @@ public:
     typedef RefCount<Auth::UserRequest> Pointer;
 
     UserRequest();
-    virtual ~UserRequest();
+    ~UserRequest() override;
     void *operator new(size_t byteCount);
     void operator delete(void *address);
 
@@ -112,7 +112,7 @@ public:
      \retval true   User has successfully been authenticated.
      \retval false  Timeouts on cached credentials have occurred or for any reason the credentials are not valid.
      */
-    virtual int authenticated() const = 0;
+    virtual bool authenticated() const;
 
     /**
      * Check a auth_user pointer for validity.
@@ -150,7 +150,7 @@ public:
      * Credentials may be found in one of the following locations (listed by order of preference):
      * - the source passed as parameter aUR
      * - cached in the HttpRequest parameter from a previous authentication of this request
-     * - cached in the ConnStateData paremeter from a previous authentication of this connection
+     * - cached in the ConnStateData parameter from a previous authentication of this connection
      *   (only applies to some situations. ie NTLM, Negotiate, Kerberos auth schemes,
      *    or decrypted SSL requests from inside an authenticated CONNECT tunnel)
      * - cached in the user credentials cache from a previous authentication of the same credentials
@@ -165,7 +165,7 @@ public:
     static AuthAclState tryToAuthenticateAndSetAuthUser(UserRequest::Pointer *aUR, Http::HdrType, HttpRequest *, ConnStateData *, Ip::Address &, AccessLogEntry::Pointer &);
 
     /// Add the appropriate [Proxy-]Authenticate header to the given reply
-    static void addReplyAuthHeader(HttpReply * rep, UserRequest::Pointer auth_user_request, HttpRequest * request, int accelerated, int internal);
+    static void AddReplyAuthHeader(HttpReply * rep, UserRequest::Pointer auth_user_request, HttpRequest * request, int accelerated, int internal);
 
     /** Start an asynchronous helper lookup to verify the user credentials
      *
@@ -179,12 +179,12 @@ public:
      */
     void start(HttpRequest *request, AccessLogEntry::Pointer &al, AUTHCB *handler, void *data);
 
-    char const * denyMessage(char const * const default_message = NULL) const;
+    char const * denyMessage(char const * const default_message = nullptr) const;
 
-    /** Possibly overrideable in future */
+    /** Possibly overridable in future */
     void setDenyMessage(char const *);
 
-    /** Possibly overrideable in future */
+    /** Possibly overridable in future */
     char const * getDenyMessage() const;
 
     /**
@@ -239,11 +239,6 @@ private:
 /* AuthUserRequest */
 
 /// \ingroup AuthAPI
-void authenticateFixHeader(HttpReply *, Auth::UserRequest::Pointer, HttpRequest *, int, int);
-/// \ingroup AuthAPI
-void authenticateAddTrailer(HttpReply *, Auth::UserRequest::Pointer, HttpRequest *, int);
-
-/// \ingroup AuthAPI
 void authenticateAuthUserRequestRemoveIp(Auth::UserRequest::Pointer, Ip::Address const &);
 /// \ingroup AuthAPI
 void authenticateAuthUserRequestClearIp(Auth::UserRequest::Pointer);
@@ -252,8 +247,8 @@ int authenticateAuthUserRequestIPCount(Auth::UserRequest::Pointer);
 
 /// \ingroup AuthAPI
 /// See Auth::UserRequest::authenticated()
-int authenticateUserAuthenticated(Auth::UserRequest::Pointer);
+bool authenticateUserAuthenticated(const Auth::UserRequest::Pointer &);
 
 #endif /* USE_AUTH */
-#endif /* SQUID_AUTHUSERREQUEST_H */
+#endif /* SQUID_SRC_AUTH_USERREQUEST_H */
 

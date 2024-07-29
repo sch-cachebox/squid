@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -65,25 +65,25 @@ error_message(long code) {
 void
 init_args(struct main_args *margs)
 {
-    margs->nlist = NULL;
-    margs->glist = NULL;
-    margs->llist = NULL;
-    margs->ulist = NULL;
-    margs->tlist = NULL;
-    margs->luser = NULL;
-    margs->lpass = NULL;
-    margs->lbind = NULL;
-    margs->lurl = NULL;
-    margs->ssl = NULL;
+    margs->nlist = nullptr;
+    margs->glist = nullptr;
+    margs->llist = nullptr;
+    margs->ulist = nullptr;
+    margs->tlist = nullptr;
+    margs->luser = nullptr;
+    margs->lpass = nullptr;
+    margs->lbind = nullptr;
+    margs->lurl = nullptr;
+    margs->ssl = nullptr;
     margs->rc_allow = 0;
     margs->AD = 0;
     margs->mdepth = 5;
     margs->nokerberos = 0;
-    margs->ddomain = NULL;
-    margs->groups = NULL;
-    margs->ndoms = NULL;
-    margs->lservs = NULL;
-    margs->principal = NULL;
+    margs->ddomain = nullptr;
+    margs->groups = nullptr;
+    margs->ndoms = nullptr;
+    margs->lservs = nullptr;
+    margs->principal = nullptr;
 }
 
 void clean_gd(struct gdstruct *gdsp);
@@ -93,7 +93,7 @@ void clean_ls(struct lsstruct *lssp);
 void
 clean_gd(struct gdstruct *gdsp)
 {
-    struct gdstruct *p = NULL, *pp = NULL;
+    struct gdstruct *p = nullptr, *pp = nullptr;
 
     p = gdsp;
     while (p) {
@@ -114,7 +114,7 @@ clean_gd(struct gdstruct *gdsp)
 void
 clean_nd(struct ndstruct *ndsp)
 {
-    struct ndstruct *p = NULL, *pp = NULL;
+    struct ndstruct *p = nullptr, *pp = nullptr;
 
     p = ndsp;
     while (p) {
@@ -135,7 +135,7 @@ clean_nd(struct ndstruct *ndsp)
 void
 clean_ls(struct lsstruct *lssp)
 {
-    struct lsstruct *p = NULL, *pp = NULL;
+    struct lsstruct *p = nullptr, *pp = nullptr;
 
     p = lssp;
     while (p) {
@@ -169,15 +169,15 @@ clean_args(struct main_args *margs)
     safe_free(margs->ddomain);
     if (margs->groups) {
         clean_gd(margs->groups);
-        margs->groups = NULL;
+        margs->groups = nullptr;
     }
     if (margs->ndoms) {
         clean_nd(margs->ndoms);
-        margs->ndoms = NULL;
+        margs->ndoms = nullptr;
     }
     if (margs->lservs) {
         clean_ls(margs->lservs);
-        margs->lservs = NULL;
+        margs->lservs = nullptr;
     }
     safe_free(margs->principal);
 }
@@ -189,18 +189,18 @@ main(int argc, char *const argv[])
 {
     char buf[6400];
     char *user, *domain, *group;
-    char *up=NULL, *dp=NULL, *np=NULL;
-    char *nuser, *nuser8 = NULL, *netbios;
+    char *up=nullptr, *dp=nullptr, *np=nullptr;
+    char *nuser, *nuser8 = nullptr, *netbios;
     int opt;
     struct main_args margs;
 #if HAVE_KRB5
     krb5_error_code code = 0;
 
-    kparam.context = NULL;
+    kparam.context = nullptr;
 #endif
 
-    setbuf(stdout, NULL);
-    setbuf(stdin, NULL);
+    setbuf(stdout, nullptr);
+    setbuf(stdin, nullptr);
 
     init_args(&margs);
 
@@ -302,7 +302,7 @@ main(int argc, char *const argv[])
             fprintf(stderr, "server@domain  - In this case server can be used for Kerberos domain domain\n");
             fprintf(stderr, "server1a@domain1:server1b@domain1:server2@domain2:server3@:server4 - A list is build with a colon as separator\n");
             clean_args(&margs);
-            exit(0);
+            exit(EXIT_SUCCESS);
         default:
             warn((char *) "%s| %s: WARNING: unknown option: -%c.\n", LogTime(), PROGRAM, opt);
         }
@@ -311,11 +311,11 @@ main(int argc, char *const argv[])
     debug((char *) "%s| %s: INFO: Starting version %s\n", LogTime(), PROGRAM, KERBEROS_LDAP_GROUP_VERSION);
     int gopt = 0;
     if (create_gd(&margs)) {
-        if ( margs.glist != NULL ) {
+        if ( margs.glist != nullptr ) {
             debug((char *) "%s| %s: FATAL: Error in group list: %s\n", LogTime(), PROGRAM, margs.glist ? margs.glist : "NULL");
             SEND_BH("");
             clean_args(&margs);
-            exit(1);
+            exit(EXIT_FAILURE);
         } else {
             debug((char *) "%s| %s: INFO: no group list given expect it from stdin\n", LogTime(), PROGRAM);
             gopt = 1;
@@ -325,13 +325,13 @@ main(int argc, char *const argv[])
         debug((char *) "%s| %s: FATAL: Error in netbios list: %s\n", LogTime(), PROGRAM, margs.nlist ? margs.nlist : "NULL");
         SEND_BH("");
         clean_args(&margs);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     if (create_ls(&margs)) {
         debug((char *) "%s| %s: Error in ldap server list: %s\n", LogTime(), PROGRAM, margs.llist ? margs.llist : "NULL");
         SEND_BH("");
         clean_args(&margs);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
 #if HAVE_KRB5
@@ -341,21 +341,21 @@ main(int argc, char *const argv[])
 
     code = krb5_init_context(&kparam.context);
     for (int i=0; i<MAX_DOMAINS; i++) {
-        kparam.mem_ccache[i]=NULL;
-        kparam.cc[i]=NULL;
+        kparam.mem_ccache[i]=nullptr;
+        kparam.cc[i]=nullptr;
         kparam.ncache=0;
     }
     if (code) {
         error((char *) "%s| %s: ERROR: Error while initialising Kerberos library : %s\n", LogTime(), PROGRAM, error_message(code));
         SEND_BH("");
         clean_args(&margs);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 #endif
 
     while (1) {
         char *c;
-        if (fgets(buf, sizeof(buf) - 1, stdin) == NULL) {
+        if (fgets(buf, sizeof(buf) - 1, stdin) == nullptr) {
             if (ferror(stdin)) {
                 debug((char *) "%s| %s: FATAL: fgets() failed! dying..... errno=%d (%s)\n", LogTime(), PROGRAM, ferror(stdin),
                       strerror(ferror(stdin)));
@@ -365,14 +365,14 @@ main(int argc, char *const argv[])
 #if HAVE_KRB5
                 krb5_cleanup();
 #endif
-                exit(1);    /* BIIG buffer */
+                exit(EXIT_FAILURE);    /* BIIG buffer */
             }
             SEND_BH("fgets NULL");
             clean_args(&margs);
 #if HAVE_KRB5
             krb5_cleanup();
 #endif
-            exit(0);
+            exit(EXIT_SUCCESS);
         }
         c = (char *) memchr(buf, '\n', sizeof(buf) - 1);
         if (c) {
@@ -444,15 +444,15 @@ main(int argc, char *const argv[])
             krb5_cleanup();
 #endif
 
-            exit(-1);
+            exit(EXIT_SUCCESS);
         }
         if (gopt) {
-            if ((group = strtok(NULL, " \n")) != NULL) {
+            if ((group = strtok(nullptr, " \n")) != nullptr) {
                 debug((char *) "%s| %s: INFO: Read group list %s from stdin\n", LogTime(), PROGRAM, group);
                 rfc1738_unescape(group);
                 if (margs.groups) {
                     clean_gd(margs.groups);
-                    margs.groups = NULL;
+                    margs.groups = nullptr;
                 }
                 margs.glist = xstrdup(group);
                 if (create_gd(&margs)) {
@@ -489,17 +489,18 @@ strup(char *s)
 #else
 #include <cstdlib>
 int
-main(int argc, char *const argv[])
+main()
 {
-    setbuf(stdout, NULL);
-    setbuf(stdin, NULL);
+    setbuf(stdout, nullptr);
+    setbuf(stdin, nullptr);
     char buf[6400];
     while (1) {
-        if (fgets(buf, sizeof(buf) - 1, stdin) == NULL) {
+        if (fgets(buf, sizeof(buf) - 1, stdin) == nullptr) {
         }
         fprintf(stdout, "ERR\n");
         fprintf(stderr, "LDAP group authorisation not supported\n");
     }
+    return EXIT_SUCCESS;
 }
 #endif
 

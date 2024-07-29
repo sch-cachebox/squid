@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -12,7 +12,7 @@
 #include "acl/NoteData.h"
 #include "acl/StringData.h"
 #include "ConfigParser.h"
-#include "Debug.h"
+#include "debug/Stream.h"
 #include "sbuf/StringConvert.h"
 #include "wordlist.h"
 
@@ -27,51 +27,33 @@ ACLNoteData::~ACLNoteData()
 bool
 ACLNoteData::match(NotePairs::Entry *entry)
 {
-    if (entry->name.cmp(name.termedBuf()) != 0)
+    if (entry->name().cmp(name) != 0)
         return false; // name mismatch
 
     // a name-only note ACL matches any value; others require a values match
     return values->empty() ||
-           values->match(entry->value.termedBuf());
+           values->match(entry->value());
 }
 
 SBufList
 ACLNoteData::dump() const
 {
     SBufList sl;
-    sl.push_back(StringToSBuf(name));
-#if __cplusplus >= 201103L
+    sl.push_back(name);
     sl.splice(sl.end(), values->dump());
-#else
-    // temp is needed until c++11 move constructor
-    SBufList temp = values->dump();
-    sl.splice(sl.end(), temp);
-#endif
     return sl;
 }
 
 void
 ACLNoteData::parse()
 {
-    char* t = ConfigParser::strtokFile();
-    assert (t != NULL);
-    name = t;
+    Acl::SetKey(name, "annotation name", ConfigParser::strtokFile());
     values->parse();
 }
 
 bool
 ACLNoteData::empty() const
 {
-    return name.size() == 0;
-}
-
-ACLData<NotePairs::Entry *> *
-ACLNoteData::clone() const
-{
-    ACLNoteData * result = new ACLNoteData;
-    result->values = dynamic_cast<ACLStringData*>(values->clone());
-    assert(result->values);
-    result->name = name;
-    return result;
+    return name.isEmpty();
 }
 

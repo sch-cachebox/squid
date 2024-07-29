@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -56,6 +56,7 @@
 #include "squid.h"
 #include "auth/basic/RADIUS/radius-util.h"
 #include "auth/basic/RADIUS/radius.h"
+#include "base/Random.h"
 #include "helper/protocol_defines.h"
 #include "md5.h"
 
@@ -63,7 +64,6 @@
 #include <cerrno>
 #include <cstring>
 #include <ctime>
-#include <random>
 #if HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
 #endif
@@ -143,7 +143,7 @@ static int
 time_since(const struct timeval *when)
 {
     struct timeval now;
-    gettimeofday(&now, NULL);
+    gettimeofday(&now, nullptr);
     return timeval_diff(when, &now);
 }
 
@@ -206,8 +206,8 @@ result_recv(char *buffer, int length)
 static void
 random_vector(char *aVector)
 {
-    static std::mt19937 mt(time(0));
-    static xuniform_int_distribution<uint8_t> dist;
+    static std::mt19937 mt(RandomSeed32());
+    static std::uniform_int_distribution<uint8_t> dist;
 
     for (int i = 0; i < AUTH_VECTOR_LEN; ++i)
         aVector[i] = static_cast<char>(dist(mt) & 0xFF);
@@ -227,11 +227,11 @@ rad_auth_config(const char *cfname)
     char line[MAXLINE];
     int srv = 0, crt = 0;
 
-    if ((cf = fopen(cfname, "r")) == NULL) {
+    if ((cf = fopen(cfname, "r")) == nullptr) {
         perror(cfname);
         return -1;
     }
-    while (fgets(line, MAXLINE, cf) != NULL) {
+    while (fgets(line, MAXLINE, cf) != nullptr) {
         if (!memcmp(line, "server", 6))
             srv = sscanf(line, "server %s", server);
         if (!memcmp(line, "secret", 6))
@@ -263,7 +263,7 @@ urldecode(char *dst, const char *src, int size)
             ++src;
             tmp[1] = *src;
             ++src;
-            *dst = strtol(tmp, NULL, 16);
+            *dst = strtol(tmp, nullptr, 16);
             ++dst;
         } else {
             *dst = *src;
@@ -416,7 +416,7 @@ authenticate(int socket_fd, const char *username, const char *passwd)
         /*
          *    Send the request we've built.
          */
-        gettimeofday(&sent, NULL);
+        gettimeofday(&sent, nullptr);
         if (send(socket_fd, (char *) auth, total_length, 0) < 0) {
             int xerrno = errno;
             // EAGAIN is expected at high traffic, just retry
@@ -437,7 +437,7 @@ authenticate(int socket_fd, const char *username, const char *passwd)
             }
             FD_ZERO(&readfds);
             FD_SET(socket_fd, &readfds);
-            if (select(socket_fd + 1, &readfds, NULL, NULL, &tv) == 0)  /* Select timeout */
+            if (select(socket_fd + 1, &readfds, nullptr, nullptr, &tv) == 0)  /* Select timeout */
                 break;
             salen = sizeof(saremote);
             len = recvfrom(socket_fd, recv_buffer, sizeof(i_recv_buffer),
@@ -474,7 +474,7 @@ main(int argc, char **argv)
     char passwd[MAXPASS];
     char *ptr;
     char buf[HELPER_INPUT_BUFFER];
-    const char *cfname = NULL;
+    const char *cfname = nullptr;
     int err = 0;
     socklen_t salen;
     int c;
@@ -509,22 +509,22 @@ main(int argc, char **argv)
         }
     }
     /* make standard output line buffered */
-    if (setvbuf(stdout, NULL, _IOLBF, 0) != 0)
-        return 1;
+    if (setvbuf(stdout, nullptr, _IOLBF, 0) != 0)
+        exit(EXIT_FAILURE);
 
     if (cfname) {
         if (rad_auth_config(cfname) < 0) {
             fprintf(stderr, "FATAL: %s: can't open configuration file '%s'.\n", argv[0], cfname);
-            exit(1);
+            exit(EXIT_FAILURE);
         }
     }
     if (!*server) {
         fprintf(stderr, "FATAL: %s: Server not specified\n", argv[0]);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     if (!*secretkey) {
         fprintf(stderr, "FATAL: %s: Shared secret not specified\n", argv[0]);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 #if _SQUID_WINDOWS_
     {
@@ -537,7 +537,7 @@ main(int argc, char **argv)
      *    Open a connection to the server.
      */
     svp = getservbyname(svc_name, "udp");
-    if (svp != NULL)
+    if (svp != nullptr)
         svc_port = ntohs((unsigned short) svp->s_port);
     else
         svc_port = atoi(svc_name);
@@ -547,12 +547,12 @@ main(int argc, char **argv)
     /* Get the IP address of the authentication server */
     if ((auth_ipaddr = get_ipaddr(server)) == 0) {
         fprintf(stderr, "FATAL: %s: Couldn't find host %s\n", argv[0], server);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
         perror("socket");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     memset(&saremote, 0, sizeof(saremote));
     saremote.sin_family = AF_INET;
@@ -561,25 +561,25 @@ main(int argc, char **argv)
 
     if (connect(sockfd, (struct sockaddr *) &saremote, sizeof(saremote)) < 0) {
         perror("connect");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     salen = sizeof(salocal);
     if (getsockname(sockfd, (struct sockaddr *) &salocal, &salen) < 0) {
         perror("getsockname");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 #ifdef O_NONBLOCK
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL, 0) | O_NONBLOCK) < 0) {
         int xerrno = errno;
         fprintf(stderr,"%s| ERROR: fcntl() failure: %s\n", argv[0], xstrerr(xerrno));
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 #endif
     nas_ipaddr = ntohl(salocal.sin_addr.s_addr);
-    while (fgets(buf, HELPER_INPUT_BUFFER, stdin) != NULL) {
+    while (fgets(buf, HELPER_INPUT_BUFFER, stdin) != nullptr) {
         char *end;
         /* protect me form to long lines */
-        if ((end = strchr(buf, '\n')) == NULL) {
+        if ((end = strchr(buf, '\n')) == nullptr) {
             err = 1;
             continue;
         }
@@ -599,7 +599,7 @@ main(int argc, char **argv)
         ptr = buf;
         while (isspace(*ptr))
             ++ptr;
-        if ((end = strchr(ptr, ' ')) == NULL) {
+        if ((end = strchr(ptr, ' ')) == nullptr) {
             SEND_ERR("No password");
             continue;
         }
@@ -613,6 +613,6 @@ main(int argc, char **argv)
         authenticate(sockfd, username, passwd);
     }
     close(sockfd);
-    exit(1);
+    return EXIT_SUCCESS;
 }
 

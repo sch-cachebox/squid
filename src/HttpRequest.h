@@ -1,21 +1,21 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_HTTPREQUEST_H
-#define SQUID_HTTPREQUEST_H
+#ifndef SQUID_SRC_HTTPREQUEST_H
+#define SQUID_SRC_HTTPREQUEST_H
 
 #include "anyp/Uri.h"
 #include "base/CbcPointer.h"
 #include "dns/forward.h"
-#include "err_type.h"
+#include "error/Error.h"
 #include "HierarchyLogEntry.h"
+#include "http/Message.h"
 #include "http/RequestMethod.h"
-#include "HttpMsg.h"
 #include "MasterXaction.h"
 #include "Notes.h"
 #include "RequestFlags.h"
@@ -34,17 +34,18 @@
 #include "eui/Eui64.h"
 #endif
 
-class ConnStateData;
-class Downloader;
 class AccessLogEntry;
 typedef RefCount<AccessLogEntry> AccessLogEntryPointer;
+class CachePeer;
+class ConnStateData;
+class Downloader;
 
 /*  Http Request */
 void httpRequestPack(void *obj, Packable *p);
 
 class HttpHdrRange;
 
-class HttpRequest: public HttpMsg
+class HttpRequest: public Http::Message
 {
     MEMPROXY_CLASS(HttpRequest);
 
@@ -53,12 +54,12 @@ public:
 
     HttpRequest(const MasterXaction::Pointer &);
     HttpRequest(const HttpRequestMethod& aMethod, AnyP::ProtocolType aProtocol, const char *schemeImage, const char *aUrlpath, const MasterXaction::Pointer &);
-    ~HttpRequest();
-    virtual void reset();
+    ~HttpRequest() override;
+    void reset() override;
 
     void initHTTP(const HttpRequestMethod& aMethod, AnyP::ProtocolType aProtocol, const char *schemeImage, const char *aUrlpath);
 
-    virtual HttpRequest *clone() const;
+    HttpRequest *clone() const override;
 
     /// Whether response to this request is potentially cachable
     /// \retval false  Not cacheable.
@@ -87,10 +88,17 @@ public:
     Adaptation::Icap::History::Pointer icapHistory() const;
 #endif
 
+    /* If a request goes through several destinations, then the following two
+     * methods will be called several times, in destinations-dependent order. */
+    /// get ready to be sent to the given cache_peer, including originserver
+    void prepForPeering(const CachePeer &peer);
+    /// get ready to be sent directly to an origin server, excluding originserver
+    void prepForDirect();
+
     void recordLookup(const Dns::LookupDetails &detail);
 
     /// sets error detail if no earlier detail was available
-    void detailError(err_type aType, int aDetail);
+    void detailError(const err_type c, const ErrorDetail::Pointer &d) { error.update(c, d); }
     /// clear error details, useful for retries/repeats
     void clearError();
 
@@ -150,8 +158,7 @@ public:
 
     int dnsWait; ///< sum of DNS lookup delays in milliseconds, for %dt
 
-    err_type errType;
-    int errDetail; ///< errType-specific detail about the transaction error
+    Error error; ///< the first transaction problem encountered (or falsy)
 
     char *peer_login;       /* Configured peer login:password */
 
@@ -165,8 +172,6 @@ public:
     char *peer_domain;      /* Configured peer forceddomain */
 
     String myportname; // Internal tag name= value from port this requests arrived in.
-
-    NotePairs::Pointer notes; ///< annotations added by the note directive and helpers
 
     String tag;         /* Internal tag for this request */
 
@@ -191,9 +196,9 @@ public:
 public:
     bool multipartRangeRequest() const;
 
-    bool parseFirstLine(const char *start, const char *end);
+    bool parseFirstLine(const char *start, const char *end) override;
 
-    virtual bool expectingBody(const HttpRequestMethod& unused, int64_t&) const;
+    bool expectingBody(const HttpRequestMethod& unused, int64_t&) const override;
 
     bool bodyNibbled() const; // the request has a [partially] consumed body
 
@@ -236,18 +241,53 @@ public:
     void ignoreRange(const char *reason);
     int64_t getRangeOffsetLimit(); /* the result of this function gets cached in rangeOffsetLimit */
 
+    /// \returns existing non-empty transaction annotations,
+    /// creates and returns empty annotations otherwise
+    NotePairs::Pointer notes();
+    bool hasNotes() const { return bool(theNotes) && !theNotes->empty(); }
+
+    void configureContentLengthInterpreter(Http::ContentLengthInterpreter &) override {}
+
+    /// Check whether the message framing headers are valid.
+    /// \returns Http::scNone or an HTTP error status
+    Http::StatusCode checkEntityFraming() const;
+
+    /// Parses request header using Parser.
+    /// Use it in contexts where the Parser object is available.
+    bool parseHeader(Http1::Parser &hp);
+    /// Parses request header from the buffer.
+    /// Use it in contexts where the Parser object not available.
+    bool parseHeader(const char *buffer, const size_t size);
+
 private:
     mutable int64_t rangeOffsetLimit;  /* caches the result of getRangeOffsetLimit */
 
+    /// annotations added by the note directive and helpers
+    /// and(or) by annotate_transaction/annotate_client ACLs.
+    NotePairs::Pointer theNotes;
 protected:
-    virtual void packFirstLineInto(Packable * p, bool full_uri) const;
+    void packFirstLineInto(Packable * p, bool full_uri) const override;
 
-    virtual bool sanityCheckStartLine(const char *buf, const size_t hdr_len, Http::StatusCode *error);
+    bool sanityCheckStartLine(const char *buf, const size_t hdr_len, Http::StatusCode *error) override;
 
-    virtual void hdrCacheInit();
+    void hdrCacheInit() override;
 
-    virtual bool inheritProperties(const HttpMsg *aMsg);
+    bool inheritProperties(const Http::Message *) override;
 };
 
-#endif /* SQUID_HTTPREQUEST_H */
+class ConnStateData;
+/**
+ * Updates ConnStateData ids and HttpRequest notes from helpers received notes.
+ */
+void UpdateRequestNotes(ConnStateData *csd, HttpRequest &request, NotePairs const &notes);
+
+/// \returns listening/*_port address used by the client connection (or nil)
+/// nil parameter(s) indicate missing caller information and are handled safely
+const Ip::Address *FindListeningPortAddress(const HttpRequest *, const AccessLogEntry *);
+
+/// \returns listening/*_port port number used by the client connection (or nothing)
+/// nil parameter(s) indicate missing caller information and are handled safely
+AnyP::Port FindListeningPortNumber(const HttpRequest *, const AccessLogEntry *);
+
+#endif /* SQUID_SRC_HTTPREQUEST_H */
 

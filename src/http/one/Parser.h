@@ -1,17 +1,18 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef _SQUID_SRC_HTTP_ONE_PARSER_H
-#define _SQUID_SRC_HTTP_ONE_PARSER_H
+#ifndef SQUID_SRC_HTTP_ONE_PARSER_H
+#define SQUID_SRC_HTTP_ONE_PARSER_H
 
 #include "anyp/ProtocolVersion.h"
 #include "http/one/forward.h"
 #include "http/StatusCode.h"
+#include "parser/forward.h"
 #include "sbuf/SBuf.h"
 
 namespace Http {
@@ -33,16 +34,21 @@ enum ParseState {
  * Works on a raw character I/O buffer and tokenizes the content into
  * the major CRLF delimited segments of an HTTP/1 procotol message:
  *
- * \item first-line (request-line / simple-request / status-line)
- * \item mime-header 0*( header-name ':' SP field-value CRLF)
+ * \li first-line (request-line / simple-request / status-line)
+ * \li mime-header 0*( header-name ':' SP field-value CRLF)
  */
 class Parser : public RefCountable
 {
 public:
     typedef SBuf::size_type size_type;
+    typedef ::Parser::Tokenizer Tokenizer;
 
-    Parser() : parseStatusCode(Http::scNone), parsingStage_(HTTP_PARSE_NONE), hackExpectsMime_(false) {}
-    virtual ~Parser() {}
+    Parser() = default;
+    Parser(const Parser &) = default;
+    Parser &operator =(const Parser &) = default;
+    Parser(Parser &&) = default;
+    Parser &operator =(Parser &&) = default;
+    ~Parser() override {}
 
     /// Set this parser back to a default state.
     /// Will DROP any reference to a buffer (does not free).
@@ -99,7 +105,7 @@ public:
      * Http::scOkay indicates no error,
      * other codes represent a parse error.
      */
-    Http::StatusCode parseStatusCode;
+    Http::StatusCode parseStatusCode = Http::scNone;
 
     /// Whitespace between regular protocol elements.
     /// Seen in RFCs as OWS, RWS, BWS, SP/HTAB but may be "relaxed" by us.
@@ -118,11 +124,9 @@ protected:
      * detect and skip the CRLF or (if tolerant) LF line terminator
      * consume from the tokenizer.
      *
-     * throws if non-terminator is detected.
-     * \retval true only if line terminator found.
-     * \retval false incomplete or missing line terminator, need more data.
+     * \throws exception on bad or InsufficientInput
      */
-    bool skipLineTerminator(Http1::Tokenizer &tok) const;
+    void skipLineTerminator(Tokenizer &) const;
 
     /**
      * Scan to find the mime headers block for current message.
@@ -142,7 +146,7 @@ protected:
     SBuf buf_;
 
     /// what stage the parser is currently up to
-    ParseState parsingStage_;
+    ParseState parsingStage_ = HTTP_PARSE_NONE;
 
     /// what protocol label has been found in the first line (if any)
     AnyP::ProtocolVersion msgProtocol_;
@@ -151,7 +155,7 @@ protected:
     SBuf mimeHeaderBlock_;
 
     /// Whether the invalid HTTP as HTTP/0.9 hack expects a mime header block
-    bool hackExpectsMime_;
+    bool hackExpectsMime_ = false;
 
 private:
     void cleanMimePrefix();
@@ -159,8 +163,8 @@ private:
 };
 
 /// skips and, if needed, warns about RFC 7230 BWS ("bad" whitespace)
-/// \returns true (always; unlike all the skip*() functions)
-bool ParseBws(Tokenizer &tok);
+/// \throws InsufficientInput when the end of BWS cannot be confirmed
+void ParseBws(Parser::Tokenizer &);
 
 /// the right debugs() level for logging HTTP violation messages
 int ErrorLevel();
@@ -168,5 +172,5 @@ int ErrorLevel();
 } // namespace One
 } // namespace Http
 
-#endif /*  _SQUID_SRC_HTTP_ONE_PARSER_H */
+#endif /* SQUID_SRC_HTTP_ONE_PARSER_H */
 

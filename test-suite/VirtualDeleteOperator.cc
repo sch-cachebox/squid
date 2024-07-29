@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -68,7 +68,7 @@ class ChildVirtual : public BaseVirtual
 public:
     void *operator new (size_t);
     void operator delete (void *);
-    virtual ~ChildVirtual();
+    ~ChildVirtual() override;
     static CallCounter Calls;
 };
 
@@ -91,7 +91,7 @@ ChildVirtual::operator delete(void *address)
 ChildVirtual::~ChildVirtual() {}
 
 int
-main(int argc, char **argv)
+main(int, char *[])
 {
     assert (BaseVirtual::Calls.news() == 0);
     assert (BaseVirtual::Calls.deletes() == 0);
@@ -107,12 +107,12 @@ main(int argc, char **argv)
     assert (BaseVirtual::Calls.deletes() == 0);
     assert (ChildVirtual::Calls.news() == 1);
     assert (ChildVirtual::Calls.deletes() == 1);
-    // deleting NULL works.
-    BaseVirtual::DeleteABase(NULL);
+    // deleting nullptr works.
+    BaseVirtual::DeleteABase(nullptr);
     assert (BaseVirtual::Calls.news() == 0);
     assert (BaseVirtual::Calls.deletes() == 0);
     assert (ChildVirtual::Calls.news() == 1);
     assert (ChildVirtual::Calls.deletes() == 1);
-    return 0;
+    return EXIT_SUCCESS;
 }
 

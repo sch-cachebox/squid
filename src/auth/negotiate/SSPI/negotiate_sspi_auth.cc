@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -48,17 +48,12 @@
 #include "helper/protocol_defines.h"
 #include "ntlmauth/ntlmauth.h"
 #include "ntlmauth/support_bits.cci"
-#include "sspwin32.h"
+#include "sspi/sspwin32.h"
 #include "util.h"
 
-#include <windows.h>
-#include <sspi.h>
-#include <security.h>
+#include <cctype>
 #if HAVE_GETOPT_H
 #include <getopt.h>
-#endif
-#if HAVE_CTYPE_H
-#include <ctype.h>
 #endif
 
 int Negotiate_packet_debug_enabled = 0;
@@ -82,7 +77,7 @@ char *negotiate_check_auth(SSP_blobP auth, int auth_length);
  * -d enable debugging.
  * -v enable verbose Negotiate packet debugging.
  */
-char *my_program_name = NULL;
+char *my_program_name = nullptr;
 
 void
 usage()
@@ -112,10 +107,10 @@ process_options(int argc, char *argv[])
             break;
         case 'h':
             usage();
-            exit(0);
+            exit(EXIT_SUCCESS);
         case '?':
             opt = optopt;
-        /* fall thru to default */
+            [[fallthrough]];
         default:
             fprintf(stderr, "ERROR: unknown option: -%c. Exiting\n", opt);
             usage();
@@ -123,7 +118,7 @@ process_options(int argc, char *argv[])
         }
     }
     if (had_error)
-        exit(1);
+        exit(EXIT_FAILURE);
 }
 
 static bool
@@ -131,7 +126,7 @@ token_decode(size_t *decodedLen, uint8_t decoded[], const char *buf)
 {
     struct base64_decode_ctx ctx;
     base64_decode_init(&ctx);
-    if (!base64_decode_update(&ctx, decodedLen, decoded, strlen(buf), reinterpret_cast<const uint8_t*>(buf)) ||
+    if (!base64_decode_update(&ctx, decodedLen, decoded, strlen(buf), buf) ||
             !base64_decode_final(&ctx)) {
         SEND("BH base64 decode failed");
         fprintf(stderr, "ERROR: base64 decoding failed for: '%s'\n", buf);
@@ -242,12 +237,12 @@ manage_request()
         if (status == SSP_ERROR) {
             FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
                           FORMAT_MESSAGE_IGNORE_INSERTS,
-                          NULL,
+                          nullptr,
                           GetLastError(),
                           MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),    /* Default language */
                           (LPTSTR) & ErrorMessage,
                           0,
-                          NULL);
+                          nullptr);
             if (ErrorMessage[strlen(ErrorMessage) - 1] == '\n')
                 ErrorMessage[strlen(ErrorMessage) - 1] = '\0';
             if (ErrorMessage[strlen(ErrorMessage) - 1] == '\r')
@@ -306,19 +301,19 @@ main(int argc, char *argv[])
 
     if (LoadSecurityDll(SSP_NTLM, NEGOTIATE_PACKAGE_NAME) == NULL) {
         fprintf(stderr, "FATAL: %s: can't initialize SSPI, exiting.\n", argv[0]);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     debug("SSPI initialized OK\n");
 
     atexit(UnloadSecurityDll);
 
     /* initialize FDescs */
-    setbuf(stdout, NULL);
-    setbuf(stderr, NULL);
+    setbuf(stdout, nullptr);
+    setbuf(stderr, nullptr);
 
     while (manage_request()) {
         /* everything is done within manage_request */
     }
-    exit(0);
+    return EXIT_SUCCESS;
 }
 

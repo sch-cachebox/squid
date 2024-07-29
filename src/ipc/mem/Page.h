@@ -1,13 +1,15 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_IPC_MEM_PAGE_H
-#define SQUID_IPC_MEM_PAGE_H
+#ifndef SQUID_SRC_IPC_MEM_PAGE_H
+#define SQUID_SRC_IPC_MEM_PAGE_H
+
+#include "ipc/mem/forward.h"
 
 #include <iosfwd>
 
@@ -28,9 +30,14 @@ public:
 
     // safer than bool which would enable silent casts to int
     typedef const uint32_t PageId::*SaferBool;
-    operator SaferBool() const { return set() ? &PageId::number : NULL; }
+    operator SaferBool() const { return set() ? &PageId::number : nullptr; }
 
-    uint32_t pool; ///< page pool ID within Squid
+    /// The ID of a PagePool (and/or PageStack) this page belongs to.
+    /// Positive values are (ab)used to detect in-use pages. See set().
+    /// Eventually, they may identify a PageStack in a multi-segment PagePool.
+    /// These IDs also distinguish page pools/stacks in debugging logs.
+    PoolId pool;
+
     // uint32_t segment; ///< memory segment ID within the pool; unused for now
     uint32_t number; ///< page number within the segment
 
@@ -45,5 +52,5 @@ std::ostream &operator <<(std::ostream &os, const PageId &page);
 
 } // namespace Ipc
 
-#endif // SQUID_IPC_MEM_PAGE_H
+#endif /* SQUID_SRC_IPC_MEM_PAGE_H */
 

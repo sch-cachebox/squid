@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef _SQUID_SRC_HELPER_CHILDCONFIG_H
-#define _SQUID_SRC_HELPER_CHILDCONFIG_H
+#ifndef SQUID_SRC_HELPER_CHILDCONFIG_H
+#define SQUID_SRC_HELPER_CHILDCONFIG_H
 
 namespace Helper
 {
@@ -37,7 +37,7 @@ public:
     /**
      * Update an existing set of details with new start/max/idle/concurrent limits.
      * This is for parsing new child settings into an object incrementally then updating
-     * the running set without loosing any of the active state or causing races.
+     * the running set without losing any of the active state or causing races.
      */
     ChildConfig &updateLimits(const ChildConfig &rhs);
 
@@ -104,6 +104,9 @@ public:
      * special configurations, for example when redirector_bypass is used.
      */
     bool defaultQueueSize;
+
+    /// older stateful helper server reservations may be forgotten
+    time_t reservationTimeout = 64; // reservation-timeout
 };
 
 } // namespace Helper
@@ -113,5 +116,5 @@ public:
 #define dump_HelperChildConfig(e,n,c)  storeAppendPrintf((e), "\n%s %d startup=%d idle=%d concurrency=%d\n", (n), (c).n_max, (c).n_startup, (c).n_idle, (c).concurrency)
 #define free_HelperChildConfig(dummy)  // NO.
 
-#endif /* _SQUID_SRC_HELPER_CHILDCONFIG_H */
+#endif /* SQUID_SRC_HELPER_CHILDCONFIG_H */
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -8,21 +8,25 @@
 
 /* DEBUG: section 93    eCAP Interface */
 
-#ifndef SQUID__ECAP__MESSAGE_REP_H
-#define SQUID__ECAP__MESSAGE_REP_H
+#ifndef SQUID_SRC_ADAPTATION_ECAP_MESSAGEREP_H
+#define SQUID_SRC_ADAPTATION_ECAP_MESSAGEREP_H
 
 #include "adaptation/forward.h"
 #include "adaptation/Message.h"
 #include "anyp/ProtocolType.h"
 #include "BodyPipe.h"
+#include "http/forward.h"
 #include "HttpHeader.h"
-#include <libecap/common/message.h>
-#include <libecap/common/header.h>
-#include <libecap/common/body.h>
 
-class HttpMsg;
-class HttpRequest;
-class HttpReply;
+#if HAVE_LIBECAP_COMMON_BODY_H
+#include <libecap/common/body.h>
+#endif
+#if HAVE_LIBECAP_COMMON_HEADER_H
+#include <libecap/common/header.h>
+#endif
+#if HAVE_LIBECAP_COMMON_MESSAGE_H
+#include <libecap/common/message.h>
+#endif
 
 namespace Adaptation
 {
@@ -31,7 +35,7 @@ namespace Ecap
 
 class XactionRep;
 
-// Translates Squid HttpMsg into libecap::Header.
+// Translates Squid Http::Message into libecap::Header.
 class HeaderRep: public libecap::Header
 {
 public:
@@ -39,33 +43,33 @@ public:
     typedef libecap::Area Area;
 
 public:
-    HeaderRep(HttpMsg &aMessage);
+    HeaderRep(Http::Message &aMessage);
 
     /* libecap::Header API */
-    virtual bool hasAny(const Name &name) const;
-    virtual Value value(const Name &name) const;
-    virtual void add(const Name &name, const Value &value);
-    virtual void removeAny(const Name &name);
-    virtual void visitEach(libecap::NamedValueVisitor &visitor) const;
-    virtual Area image() const;
-    virtual void parse(const Area &buf); // throws on failures
+    bool hasAny(const Name &name) const override;
+    Value value(const Name &name) const override;
+    void add(const Name &name, const Value &value) override;
+    void removeAny(const Name &name) override;
+    void visitEach(libecap::NamedValueVisitor &visitor) const override;
+    Area image() const override;
+    void parse(const Area &buf) override; // throws on failures
 
 protected:
     static Http::HdrType TranslateHeaderId(const Name &name);
 
 private:
     HttpHeader &theHeader; // the header being translated to libecap
-    HttpMsg &theMessage;   // the message being translated to libecap
+    Http::Message &theMessage;   // the message being translated to libecap
 };
 
-// Helps translate Squid HttpMsg into libecap::FirstLine (see children).
+// Helps translate Squid Http::Message into libecap::FirstLine (see children).
 class FirstLineRep
 {
 public:
     typedef libecap::Name Name;
 
 public:
-    FirstLineRep(HttpMsg &aMessage);
+    FirstLineRep(Http::Message &aMessage);
 
     libecap::Version version() const;
     void version(const libecap::Version &aVersion);
@@ -76,7 +80,7 @@ protected:
     static AnyP::ProtocolType TranslateProtocolId(const Name &name);
 
 private:
-    HttpMsg &theMessage; // the message which first line is being translated
+    Http::Message &theMessage; // the message which first line is being translated
 };
 
 // Translates Squid HttpRequest into libecap::RequestLine.
@@ -90,14 +94,14 @@ public:
     RequestLineRep(HttpRequest &aMessage);
 
     /* libecap::RequestLine API */
-    virtual void uri(const Area &aUri);
-    virtual Area uri() const;
-    virtual void method(const Name &aMethod);
-    virtual Name method() const;
-    virtual libecap::Version version() const;
-    virtual void version(const libecap::Version &aVersion);
-    virtual Name protocol() const;
-    virtual void protocol(const Name &aProtocol);
+    void uri(const Area &aUri) override;
+    Area uri() const override;
+    void method(const Name &aMethod) override;
+    Name method() const override;
+    libecap::Version version() const override;
+    void version(const libecap::Version &aVersion) override;
+    Name protocol() const override;
+    void protocol(const Name &aProtocol) override;
 
 private:
     HttpRequest &theMessage; // the request header being translated to libecap
@@ -114,14 +118,14 @@ public:
     StatusLineRep(HttpReply &aMessage);
 
     /* libecap::StatusLine API */
-    virtual void statusCode(int code);
-    virtual int statusCode() const;
-    virtual void reasonPhrase(const Area &phrase);
-    virtual Area reasonPhrase() const;
-    virtual libecap::Version version() const;
-    virtual void version(const libecap::Version &aVersion);
-    virtual Name protocol() const;
-    virtual void protocol(const Name &aProtocol);
+    void statusCode(int code) override;
+    int statusCode() const override;
+    void reasonPhrase(const Area &phrase) override;
+    Area reasonPhrase() const override;
+    libecap::Version version() const override;
+    void version(const libecap::Version &aVersion) override;
+    Name protocol() const override;
+    void protocol(const Name &aProtocol) override;
 
 private:
     HttpReply &theMessage; // the request header being translated to libecap
@@ -139,7 +143,7 @@ public:
     void tie(const BodyPipe::Pointer &aBody); // late binding if !theBody;
 
     // libecap::Body API
-    virtual BodySize bodySize() const;
+    BodySize bodySize() const override;
 
 private:
     BodyPipe::Pointer theBody; // the body being translated to libecap
@@ -149,18 +153,18 @@ private:
 class MessageRep: public libecap::Message
 {
 public:
-    explicit MessageRep(HttpMsg *rawHeader);
-    virtual ~MessageRep();
+    explicit MessageRep(Http::Message *rawHeader);
+    ~MessageRep() override;
 
     /* libecap::Message API */
-    virtual libecap::shared_ptr<libecap::Message> clone() const;
-    virtual libecap::FirstLine &firstLine();
-    virtual const libecap::FirstLine &firstLine() const;
-    virtual libecap::Header &header();
-    virtual const libecap::Header &header() const;
-    virtual void addBody();
-    virtual libecap::Body *body();
-    virtual const libecap::Body *body() const;
+    libecap::shared_ptr<libecap::Message> clone() const override;
+    libecap::FirstLine &firstLine() override;
+    const libecap::FirstLine &firstLine() const override;
+    libecap::Header &header() override;
+    const libecap::Header &header() const override;
+    void addBody() override;
+    libecap::Body *body() override;
+    const libecap::Body *body() const override;
 
     void tieBody(Ecap::XactionRep *x); // to a specific transaction
 
@@ -177,5 +181,5 @@ private:
 } // namespace Ecap
 } // namespace Adaptation
 
-#endif /* SQUID__E_CAP__MESSAGE_REP_H */
+#endif /* SQUID_SRC_ADAPTATION_ECAP_MESSAGEREP_H */
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -9,21 +9,26 @@
 /* DEBUG: section 93    eCAP Interface */
 
 #include "squid.h"
-#include "BodyPipe.h"
-#include "HttpReply.h"
-#include "HttpRequest.h"
-#include <libecap/common/names.h>
-#include <libecap/common/area.h>
-#include <libecap/common/version.h>
-#include <libecap/common/named_values.h>
-#include "adaptation/ecap/Host.h" /* for protocol constants */
+#include "adaptation/ecap/Host.h"
 #include "adaptation/ecap/MessageRep.h"
 #include "adaptation/ecap/XactionRep.h"
 #include "base/TextException.h"
+#include "HttpReply.h"
 
-/* HeaderRep */
+#if HAVE_LIBECAP_COMMON_AREA_H
+#include <libecap/common/area.h>
+#endif
+#if HAVE_LIBECAP_COMMON_NAMED_VALUES_H
+#include <libecap/common/named_values.h>
+#endif
+#if HAVE_LIBECAP_COMMON_NAMES_H
+#include <libecap/common/names.h>
+#endif
+#if HAVE_LIBECAP_COMMON_VERSION_H
+#include <libecap/common/version.h>
+#endif
 
-Adaptation::Ecap::HeaderRep::HeaderRep(HttpMsg &aMessage): theHeader(aMessage.header),
+Adaptation::Ecap::HeaderRep::HeaderRep(Http::Message &aMessage): theHeader(aMessage.header),
     theMessage(aMessage)
 {
 }
@@ -52,7 +57,7 @@ void
 Adaptation::Ecap::HeaderRep::add(const Name &name, const Value &value)
 {
     const Http::HdrType squidId = TranslateHeaderId(name); // Http::HdrType::OTHER OK
-    HttpHeaderEntry *e = new HttpHeaderEntry(squidId, name.image().c_str(),
+    HttpHeaderEntry *e = new HttpHeaderEntry(squidId, SBuf(name.image()),
             value.toString().c_str());
     theHeader.addEntry(e);
 
@@ -78,7 +83,7 @@ Adaptation::Ecap::HeaderRep::visitEach(libecap::NamedValueVisitor &visitor) cons
 {
     HttpHeaderPos pos = HttpHeaderInitPos;
     while (HttpHeaderEntry *e = theHeader.getEntry(&pos)) {
-        const Name name(e->name.termedBuf()); // optimize: find std Names
+        const Name name(std::string(e->name.rawContent(), e->name.length())); // optimize: find std Names
         name.assignHostId(e->id);
         visitor.visit(name, Value(e->value.rawBuf(), e->value.size()));
     }
@@ -111,7 +116,7 @@ Adaptation::Ecap::HeaderRep::TranslateHeaderId(const Name &name)
 
 /* FirstLineRep */
 
-Adaptation::Ecap::FirstLineRep::FirstLineRep(HttpMsg &aMessage): theMessage(aMessage)
+Adaptation::Ecap::FirstLineRep::FirstLineRep(Http::Message &aMessage): theMessage(aMessage)
 {
 }
 
@@ -140,8 +145,6 @@ Adaptation::Ecap::FirstLineRep::protocol() const
         return libecap::protocolHttps;
     case AnyP::PROTO_FTP:
         return libecap::protocolFtp;
-    case AnyP::PROTO_GOPHER:
-        return libecap::protocolGopher;
     case AnyP::PROTO_WAIS:
         return libecap::protocolWais;
     case AnyP::PROTO_WHOIS:
@@ -154,12 +157,14 @@ Adaptation::Ecap::FirstLineRep::protocol() const
     case AnyP::PROTO_HTCP:
         return protocolHtcp;
 #endif
-    case AnyP::PROTO_CACHE_OBJECT:
-        return protocolCacheObj;
     case AnyP::PROTO_ICY:
         return protocolIcy;
     case AnyP::PROTO_COAP:
     case AnyP::PROTO_COAPS: // use 'unknown' until libecap supports coap:// and coaps://
+    // other protocols defined in Squid but not libecap use 'unknown'
+    case AnyP::PROTO_AUTHORITY_FORM:
+    case AnyP::PROTO_SSL:
+    case AnyP::PROTO_TLS:
     case AnyP::PROTO_UNKNOWN:
         return protocolUnknown; // until we remember the protocol image
     case AnyP::PROTO_NONE:
@@ -343,7 +348,7 @@ void
 Adaptation::Ecap::BodyRep::tie(const BodyPipe::Pointer &aBody)
 {
     Must(!theBody);
-    Must(aBody != NULL);
+    Must(aBody != nullptr);
     theBody = aBody;
 }
 
@@ -355,9 +360,9 @@ Adaptation::Ecap::BodyRep::bodySize() const
 
 /* MessageRep */
 
-Adaptation::Ecap::MessageRep::MessageRep(HttpMsg *rawHeader):
-    theMessage(rawHeader), theFirstLineRep(NULL),
-    theHeaderRep(NULL), theBodyRep(NULL)
+Adaptation::Ecap::MessageRep::MessageRep(Http::Message *rawHeader):
+    theMessage(rawHeader), theFirstLineRep(nullptr),
+    theHeaderRep(nullptr), theBodyRep(nullptr)
 {
     Must(theMessage.header); // we do not want to represent a missing message
 
@@ -370,7 +375,7 @@ Adaptation::Ecap::MessageRep::MessageRep(HttpMsg *rawHeader):
 
     theHeaderRep = new HeaderRep(*theMessage.header);
 
-    if (theMessage.body_pipe != NULL)
+    if (theMessage.body_pipe != nullptr)
         theBodyRep = new BodyRep(theMessage.body_pipe);
 }
 
@@ -384,12 +389,12 @@ Adaptation::Ecap::MessageRep::~MessageRep()
 libecap::shared_ptr<libecap::Message>
 Adaptation::Ecap::MessageRep::clone() const
 {
-    HttpMsg *hdr = theMessage.header->clone();
-    hdr->body_pipe = NULL; // if any; TODO: remove pipe cloning from ::clone?
+    Http::Message *hdr = theMessage.header->clone();
+    hdr->body_pipe = nullptr; // if any; TODO: remove pipe cloning from ::clone?
     libecap::shared_ptr<libecap::Message> res(new MessageRep(hdr));
 
     // restore indication of a body if needed, but not the pipe
-    if (theMessage.header->body_pipe != NULL)
+    if (theMessage.header->body_pipe != nullptr)
         res->addBody();
 
     return res;
@@ -430,13 +435,13 @@ Adaptation::Ecap::MessageRep::addBody()
 {
     Must(!theBodyRep);
     Must(!theMessage.body_pipe); // set in tieBody()
-    theBodyRep = new BodyRep(NULL);
+    theBodyRep = new BodyRep(nullptr);
 }
 
 void
 Adaptation::Ecap::MessageRep::tieBody(Adaptation::Ecap::XactionRep *x)
 {
-    Must(theBodyRep != NULL); // addBody must be called first
+    Must(theBodyRep != nullptr); // addBody must be called first
     Must(!theMessage.header->body_pipe);
     Must(!theMessage.body_pipe);
     theMessage.header->body_pipe = new BodyPipe(x);

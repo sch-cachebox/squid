@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -10,61 +10,21 @@
 #include "acl/Gadgets.h"
 #include "CachePeer.h"
 #include "defines.h"
+#include "neighbors.h"
 #include "NeighborTypeDomainList.h"
 #include "pconn.h"
+#include "PeerDigest.h"
 #include "PeerPoolMgr.h"
+#include "SquidConfig.h"
+#include "util.h"
 
 CBDATA_CLASS_INIT(CachePeer);
 
-CachePeer::CachePeer() :
-    index(0),
-    name(NULL),
-    host(NULL),
-    type(PEER_NONE),
-    http_port(CACHE_HTTP_PORT),
-    typelist(NULL),
-    access(NULL),
-    weight(1),
-    basetime(0),
-#if USE_CACHE_DIGESTS
-    digest(NULL),
-    digest_url(NULL),
-#endif
-    tcp_up(0),
-    reprobe(false),
-    n_addresses(0),
-    rr_count(0),
-    next(NULL),
-    testing_now(false),
-    login(NULL),
-    connect_timeout_raw(0),
-    connect_fail_limit(0),
-    max_conn(0),
-    domain(NULL),
-    front_end_https(0),
-    connection_auth(2 /* auto */)
+CachePeer::CachePeer(const char * const hostname):
+    name(xstrdup(hostname)),
+    host(xstrdup(hostname))
 {
-    memset(&stats, 0, sizeof(stats));
-    stats.logged_state = PEER_ALIVE;
-
-    memset(&icp, 0, sizeof(icp));
-    icp.port = CACHE_ICP_PORT;
-    icp.version = ICP_VERSION_CURRENT;
-
-#if USE_HTCP
-    memset(&htcp, 0, sizeof(htcp));
-#endif
-    memset(&options, 0, sizeof(options));
-    memset(&mcast, 0, sizeof(mcast));
-    memset(&carp, 0, sizeof(carp));
-#if USE_AUTH
-    memset(&userhash, 0, sizeof(userhash));
-#endif
-    memset(&sourcehash, 0, sizeof(sourcehash));
-
-    standby.pool = NULL;
-    standby.limit = 0;
-    standby.waitingForClose = false;
+    Tolower(host); // but .name preserves original spelling
 }
 
 CachePeer::~CachePeer()
@@ -81,11 +41,9 @@ CachePeer::~CachePeer()
     aclDestroyAccessList(&access);
 
 #if USE_CACHE_DIGESTS
-    cbdataReferenceDone(digest);
+    delete digest;
     xfree(digest_url);
 #endif
-
-    delete next;
 
     xfree(login);
 
@@ -95,5 +53,68 @@ CachePeer::~CachePeer()
     PeerPoolMgr::Checkpoint(standby.mgr, "peer gone");
 
     xfree(domain);
+}
+
+void
+CachePeer::noteSuccess()
+{
+    if (!tcp_up) {
+        debugs(15, 2, "connection to " << *this << " succeeded");
+        tcp_up = connect_fail_limit; // NP: so peerAlive() works properly.
+        peerAlive(this);
+    } else {
+        tcp_up = connect_fail_limit;
+    }
+}
+
+// TODO: Require callers to detail failures instead of using one (and often
+// misleading!) "connection failed" phrase for all of them.
+/// noteFailure() helper for handling failures attributed to this peer
+void
+CachePeer::noteFailure()
+{
+    stats.last_connect_failure = squid_curtime;
+    if (tcp_up > 0)
+        --tcp_up;
+
+    const auto consideredAliveByAdmin = (stats.logged_state == PEER_ALIVE);
+    const auto level = consideredAliveByAdmin ? DBG_IMPORTANT : 2;
+    debugs(15, level, "ERROR: Connection to " << *this << " failed");
+
+    if (consideredAliveByAdmin) {
+        if (!tcp_up) {
+            debugs(15, DBG_IMPORTANT, "Detected DEAD " << neighborTypeStr(this) << ": " << name);
+            stats.logged_state = PEER_DEAD;
+        } else {
+            debugs(15, 2, "additional failures needed to mark this cache_peer DEAD: " << tcp_up);
+        }
+    } else {
+        assert(!tcp_up);
+        debugs(15, 2, "cache_peer " << *this << " is still DEAD");
+    }
+}
+
+void
+CachePeer::rename(const char * const newName)
+{
+    if (!newName || !*newName)
+        throw TextException("cache_peer name=value cannot be empty", Here());
+
+    xfree(name);
+    name = xstrdup(newName);
+}
+
+time_t
+CachePeer::connectTimeout() const
+{
+    if (connect_timeout_raw > 0)
+        return connect_timeout_raw;
+    return Config.Timeout.peer_connect;
+}
+
+std::ostream &
+operator <<(std::ostream &os, const CachePeer &p)
+{
+    return os << p.name;
 }
 

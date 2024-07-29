@@ -1,18 +1,19 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef _SQUID_SRC_AUTH_NEGOTIATE_USERREQUEST_H
-#define _SQUID_SRC_AUTH_NEGOTIATE_USERREQUEST_H
+#ifndef SQUID_SRC_AUTH_NEGOTIATE_USERREQUEST_H
+#define SQUID_SRC_AUTH_NEGOTIATE_USERREQUEST_H
 
 #if HAVE_AUTH_MODULE_NEGOTIATE
 
 #include "auth/UserRequest.h"
 #include "helper/forward.h"
+#include "helper/ReservationId.h"
 
 class ConnStateData;
 class HttpReply;
@@ -23,25 +24,21 @@ namespace Auth
 namespace Negotiate
 {
 
-/// \ingroup AuthNegotiateAPI
 class UserRequest : public Auth::UserRequest
 {
     MEMPROXY_CLASS(Auth::Negotiate::UserRequest);
 
 public:
     UserRequest();
-    virtual ~UserRequest();
-    virtual int authenticated() const;
-    virtual void authenticate(HttpRequest * request, ConnStateData * conn, Http::HdrType type);
-    virtual Direction module_direction();
-    virtual void startHelperLookup(HttpRequest *request, AccessLogEntry::Pointer &al, AUTHCB *, void *);
-    virtual const char *credentialsStr();
+    ~UserRequest() override;
+    void authenticate(HttpRequest * request, ConnStateData * conn, Http::HdrType type) override;
+    Direction module_direction() override;
+    void startHelperLookup(HttpRequest *request, AccessLogEntry::Pointer &al, AUTHCB *, void *) override;
+    const char *credentialsStr() override;
 
-    virtual const char * connLastHeader();
+    const char * connLastHeader() override;
 
-    /* we need to store the helper server between requests */
-    helper_stateful_server *authserver;
-    void releaseAuthServer(void); ///< Release the authserver helper server properly.
+    void releaseAuthServer(void) override; ///< Release the authserver helper server properly.
 
     /* what connection is this associated with */
     /* ConnStateData * conn;*/
@@ -57,6 +54,9 @@ public:
     /* need access to the request flags to mess around on pconn failure */
     HttpRequest *request;
 
+    /// a helper-issued reservation locking the helper state between
+    /// HTTP requests
+    Helper::ReservationId reservationId;
 private:
     static HLPCB HandleReply;
 };
@@ -65,5 +65,5 @@ private:
 } // namespace Auth
 
 #endif /* HAVE_AUTH_MODULE_NEGOTIATE */
-#endif /* _SQUID_SRC_AUTH_NEGOTIATE_USERREQUEST_H */
+#endif /* SQUID_SRC_AUTH_NEGOTIATE_USERREQUEST_H */
 

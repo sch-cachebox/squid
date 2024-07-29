@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -9,16 +9,15 @@
 #include "squid.h"
 #include "auth/basic/Config.h"
 #include "auth/basic/User.h"
+#include "auth/Config.h"
 #include "auth/CredentialsCache.h"
-#include "Debug.h"
-#include "SquidConfig.h"
-#include "SquidTime.h"
+#include "debug/Stream.h"
 
-Auth::Basic::User::User(Auth::Config *aConfig, const char *aRequestRealm) :
+Auth::Basic::User::User(Auth::SchemeConfig *aConfig, const char *aRequestRealm) :
     Auth::User(aConfig, aRequestRealm),
-    passwd(NULL),
-    queue(NULL),
-    currentRequest(NULL)
+    passwd(nullptr),
+    queue(nullptr),
+    currentRequest(nullptr)
 {}
 
 Auth::Basic::User::~User()
@@ -33,7 +32,7 @@ Auth::Basic::User::ttl() const
         return -1; // TTL is obsolete NOW.
 
     int32_t basic_ttl = expiretime - squid_curtime + static_cast<Auth::Basic::Config*>(config)->credentialsTTL;
-    int32_t global_ttl = static_cast<int32_t>(expiretime - squid_curtime + ::Config.authenticateTTL);
+    int32_t global_ttl = static_cast<int32_t>(expiretime - squid_curtime + Auth::TheConfig.credentialsTtl);
 
     return min(basic_ttl, global_ttl);
 }
@@ -52,9 +51,9 @@ Auth::Basic::User::authenticated() const
 bool
 Auth::Basic::User::valid() const
 {
-    if (username() == NULL)
+    if (username() == nullptr)
         return false;
-    if (passwd == NULL)
+    if (passwd == nullptr)
         return false;
     return true;
 }
@@ -62,20 +61,20 @@ Auth::Basic::User::valid() const
 void
 Auth::Basic::User::updateCached(Auth::Basic::User *from)
 {
-    debugs(29, 9, HERE << "Found user '" << from->username() << "' already in the user cache as '" << this << "'");
+    debugs(29, 9, "Found user '" << from->username() << "' already in the user cache as '" << this << "'");
 
     assert(strcmp(from->username(), username()) == 0);
 
     if (strcmp(from->passwd, passwd)) {
-        debugs(29, 4, HERE << "new password found. Updating in user master record and resetting auth state to unchecked");
+        debugs(29, 4, "new password found. Updating in user master record and resetting auth state to unchecked");
         credentials(Auth::Unchecked);
         xfree(passwd);
         passwd = from->passwd;
-        from->passwd = NULL;
+        from->passwd = nullptr;
     }
 
     if (credentials() == Auth::Failed) {
-        debugs(29, 4, HERE << "last attempt to authenticate this user failed, resetting auth state to unchecked");
+        debugs(29, 4, "last attempt to authenticate this user failed, resetting auth state to unchecked");
         credentials(Auth::Unchecked);
     }
 }

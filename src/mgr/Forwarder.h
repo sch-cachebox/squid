@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -8,11 +8,12 @@
 
 /* DEBUG: section 16    Cache Manager API */
 
-#ifndef SQUID_MGR_FORWARDER_H
-#define SQUID_MGR_FORWARDER_H
+#ifndef SQUID_SRC_MGR_FORWARDER_H
+#define SQUID_SRC_MGR_FORWARDER_H
 
 #include "comm/forward.h"
 #include "ipc/Forwarder.h"
+#include "log/forward.h"
 #include "mgr/ActionParams.h"
 
 class CommCloseCbParams;
@@ -29,19 +30,19 @@ namespace Mgr
  */
 class Forwarder: public Ipc::Forwarder
 {
-    CBDATA_CLASS(Forwarder);
+    CBDATA_CHILD(Forwarder);
 
 public:
     Forwarder(const Comm::ConnectionPointer &aConn, const ActionParams &aParams, HttpRequest* aRequest,
-              StoreEntry* anEntry);
-    virtual ~Forwarder();
+              StoreEntry* anEntry, const AccessLogEntryPointer &anAle);
+    ~Forwarder() override;
 
 protected:
     /* Ipc::Forwarder API */
-    virtual void swanSong();
-    virtual void handleError();
-    virtual void handleTimeout();
-    virtual void handleException(const std::exception& e);
+    void swanSong() override;
+    void handleError() override;
+    void handleTimeout() override;
+    void handleException(const std::exception& e) override;
 
 private:
     void noteCommClosed(const CommCloseCbParams& params);
@@ -52,9 +53,10 @@ private:
     StoreEntry* entry; ///< Store entry expecting the response
     Comm::ConnectionPointer conn; ///< HTTP client connection descriptor
     AsyncCall::Pointer closer; ///< comm_close handler for the HTTP connection
+    AccessLogEntryPointer ale; ///< more transaction details
 };
 
 } // namespace Mgr
 
-#endif /* SQUID_MGR_FORWARDER_H */
+#endif /* SQUID_SRC_MGR_FORWARDER_H */
 

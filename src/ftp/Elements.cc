@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -15,7 +15,7 @@
 #include "sbuf/SBuf.h"
 
 // FTP does not have a notion of a "protocol version" but we need something for
-// compatibility with the current HttpMsg wrapping layer. We use version 1.1:
+// compatibility with the current Http::Message wrapping layer. We use version 1.1:
 // * some ICAP services probably expect /1.0 or /1.1 when parsing HTTP headers;
 // * FTP commands are sent on a "persistent by default" connection, just like
 //   HTTP/1.1. Using 1.1 leads to fewer exceptions in current code shared by
@@ -40,7 +40,7 @@ Ftp::HttpReplyWrapper(const int ftpStatus, const char *ftpReason, const Http::St
     {
         HttpHdrCc cc;
         cc.Private(String());
-        header.putCc(&cc);
+        header.putCc(cc);
     }
     if (ftpStatus > 0)
         header.putInt(Http::HdrType::FTP_STATUS, ftpStatus);

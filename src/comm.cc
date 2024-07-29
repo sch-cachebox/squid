@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -9,6 +9,7 @@
 /* DEBUG: section 05    Socket Functions */
 
 #include "squid.h"
+#include "base/AsyncFunCalls.h"
 #include "ClientInfo.h"
 #include "comm/AcceptLimiter.h"
 #include "comm/comm_internal.h"
@@ -18,7 +19,6 @@
 #include "comm/Read.h"
 #include "comm/TcpAcceptor.h"
 #include "comm/Write.h"
-#include "CommRead.h"
 #include "compat/cmsg.h"
 #include "DescriptorSet.h"
 #include "event.h"
@@ -30,8 +30,8 @@
 #include "ip/QosConfig.h"
 #include "ip/tools.h"
 #include "pconn.h"
-#include "profiler/Profiler.h"
 #include "sbuf/SBuf.h"
+#include "sbuf/Stream.h"
 #include "SquidConfig.h"
 #include "StatCounters.h"
 #include "StoreIOBuffer.h"
@@ -58,6 +58,7 @@
  */
 
 static IOCB commHalfClosedReader;
+static int comm_openex(int sock_type, int proto, Ip::Address &, int flags, const char *note);
 static void comm_init_opened(const Comm::ConnectionPointer &conn, const char *note, struct addrinfo *AI);
 static int comm_apply_flags(int new_socket, Ip::Address &addr, int flags, struct addrinfo *AI);
 
@@ -69,20 +70,19 @@ static void commHandleWriteHelper(void * data);
 
 /* STATIC */
 
-static DescriptorSet *TheHalfClosed = NULL; /// the set of half-closed FDs
+static DescriptorSet *TheHalfClosed = nullptr; /// the set of half-closed FDs
 static bool WillCheckHalfClosed = false; /// true if check is scheduled
 static EVH commHalfClosedCheck;
 static void commPlanHalfClosedCheck();
 
 static Comm::Flag commBind(int s, struct addrinfo &);
+static void commSetBindAddressNoPort(int);
 static void commSetReuseAddr(int);
 static void commSetNoLinger(int);
 #ifdef TCP_NODELAY
 static void commSetTcpNoDelay(int);
 #endif
 static void commSetTcpRcvbuf(int, int);
-
-fd_debug_t *fdd_table = NULL;
 
 bool
 isOpen(const int fd)
@@ -113,6 +113,8 @@ comm_empty_os_read_buffers(int fd)
     if (fd_table[fd].flags.nonblocking && fd_table[fd].type != FD_MSGHDR) {
         while (FD_READ_METHOD(fd, buf, SQUID_TCP_SO_RCVBUF) > 0) {};
     }
+#else
+    (void)fd;
 #endif
 }
 
@@ -124,7 +126,7 @@ comm_udp_recvfrom(int fd, void *buf, size_t len, int flags, Ip::Address &from)
 {
     ++ statCounter.syscalls.sock.recvfroms;
     debugs(5,8, "comm_udp_recvfrom: FD " << fd << " from " << from);
-    struct addrinfo *AI = NULL;
+    struct addrinfo *AI = nullptr;
     Ip::Address::InitAddr(AI);
     int x = recvfrom(fd, buf, len, flags, AI->ai_addr, &AI->ai_addrlen);
     from = *AI;
@@ -148,7 +150,7 @@ comm_udp_send(int s, const void *buf, size_t len, int flags)
 bool
 comm_has_incomplete_write(int fd)
 {
-    assert(isOpen(fd) && COMMIO_FD_WRITECB(fd) != NULL);
+    assert(isOpen(fd) && COMMIO_FD_WRITECB(fd) != nullptr);
     return COMMIO_FD_WRITECB(fd)->active();
 }
 
@@ -162,7 +164,7 @@ unsigned short
 comm_local_port(int fd)
 {
     Ip::Address temp;
-    struct addrinfo *addr = NULL;
+    struct addrinfo *addr = nullptr;
     fde *F = &fd_table[fd];
 
     /* If the fd is closed already, just return */
@@ -182,7 +184,7 @@ comm_local_port(int fd)
 
     if (getsockname(fd, addr->ai_addr, &(addr->ai_addrlen)) ) {
         int xerrno = errno;
-        debugs(50, DBG_IMPORTANT, MYNAME << "Failed to retrieve TCP/UDP port number for socket: FD " << fd << ": " << xstrerr(xerrno));
+        debugs(50, DBG_IMPORTANT, "ERROR: " << MYNAME << "Failed to retrieve TCP/UDP port number for socket: FD " << fd << ": " << xstrerr(xerrno));
         Ip::Address::FreeAddr(addr);
         return 0;
     }
@@ -201,6 +203,22 @@ comm_local_port(int fd)
     return F->local_addr.port();
 }
 
+/// sets the IP_BIND_ADDRESS_NO_PORT socket option to optimize ephemeral port
+/// reuse by outgoing TCP connections that must bind(2) to a source IP address
+static void
+commSetBindAddressNoPort(const int fd)
+{
+#if defined(IP_BIND_ADDRESS_NO_PORT)
+    int flag = 1;
+    if (setsockopt(fd, IPPROTO_IP, IP_BIND_ADDRESS_NO_PORT, reinterpret_cast<char*>(&flag), sizeof(flag)) < 0) {
+        const auto savedErrno = errno;
+        debugs(50, DBG_IMPORTANT, "ERROR: setsockopt(IP_BIND_ADDRESS_NO_PORT) failure: " << xstrerr(savedErrno));
+    }
+#else
+    (void)fd;
+#endif
+}
+
 static Comm::Flag
 commBind(int s, struct addrinfo &inaddr)
 {
@@ -211,7 +229,7 @@ commBind(int s, struct addrinfo &inaddr)
         return Comm::OK;
     }
     int xerrno = errno;
-    debugs(50, DBG_CRITICAL, MYNAME << "Cannot bind socket FD " << s << " to " << fd_table[s].local_addr << ": " << xstrerr(xerrno));
+    debugs(50, DBG_CRITICAL, "ERROR: " << MYNAME << "Cannot bind socket FD " << s << " to " << fd_table[s].local_addr << ": " << xstrerr(xerrno));
 
     return Comm::COMM_ERROR;
 }
@@ -227,6 +245,10 @@ comm_open(int sock_type,
           int flags,
           const char *note)
 {
+    // assume zero-port callers do not need to know the assigned port right away
+    if (sock_type == SOCK_STREAM && addr.port() == 0 && ((flags & COMM_DOBIND) || !addr.isAnyAddr()))
+        flags |= COMM_DOBIND_PORT_LATER;
+
     return comm_openex(sock_type, proto, addr, flags, note);
 }
 
@@ -267,7 +289,7 @@ limitError(int const anErrno)
     return anErrno == ENFILE || anErrno == EMFILE;
 }
 
-void
+static void
 comm_set_v6only(int fd, int tos)
 {
 #ifdef IPV6_V6ONLY
@@ -286,7 +308,7 @@ comm_set_v6only(int fd, int tos)
  * - OpenBSD divert-to support,
  * - FreeBSD IPFW TPROXY v4 support.
  */
-void
+static void
 comm_set_transparent(int fd)
 {
 #if _SQUID_LINUX_ && defined(IP_TRANSPARENT) // Linux
@@ -308,6 +330,7 @@ comm_set_transparent(int fd)
 
 #else
     debugs(50, DBG_CRITICAL, "WARNING: comm_open: setsockopt(TPROXY) not supported on this platform");
+    (void)fd;
 #endif /* sockopt */
 
 #if defined(soLevel) && defined(soFlag)
@@ -328,7 +351,7 @@ comm_set_transparent(int fd)
  * Create a socket. Default is blocking, stream (TCP) socket.  IO_TYPE
  * is OR of flags specified in defines.h:COMM_*
  */
-int
+static int
 comm_openex(int sock_type,
             int proto,
             Ip::Address &addr,
@@ -336,11 +359,16 @@ comm_openex(int sock_type,
             const char *note)
 {
     int new_socket;
-    struct addrinfo *AI = NULL;
+    struct addrinfo *AI = nullptr;
 
-    PROF_start(comm_open);
     /* Create socket for accepting new connections. */
     ++ statCounter.syscalls.sock.sockets;
+
+    if (!Ip::EnableIpv6 && addr.isIPv6()) {
+        debugs(50, 2, "refusing to open an IPv6 socket when IPv6 support is disabled: " << addr);
+        errno = ENOTSUP;
+        return -1;
+    }
 
     /* Setup the socket addrinfo details for use */
     addr.getAddrInfo(AI);
@@ -350,7 +378,7 @@ comm_openex(int sock_type,
     debugs(50, 3, "comm_openex: Attempt open socket for: " << addr );
 
     new_socket = socket(AI->ai_family, AI->ai_socktype, AI->ai_protocol);
-    int xerrno = errno;
+    const auto firstErrNo = errno;
 
     /* under IPv6 there is the possibility IPv6 is present but disabled. */
     /* try again as IPv4-native if possible */
@@ -363,6 +391,8 @@ comm_openex(int sock_type,
         AI->ai_protocol = proto;
         debugs(50, 3, "Attempt fallback open socket for: " << addr );
         new_socket = socket(AI->ai_family, AI->ai_socktype, AI->ai_protocol);
+        // TODO: Report failures of this second socket() call.
+        // if both socket() calls fail, we use firstErrNo
         debugs(50, 2, "attempt open " << note << " socket on: " << addr);
     }
 
@@ -371,17 +401,16 @@ comm_openex(int sock_type,
          * are failing because the open file table is full.  This
          * limits the number of simultaneous clients */
 
-        if (limitError(errno)) {
-            debugs(50, DBG_IMPORTANT, MYNAME << "socket failure: " << xstrerr(xerrno));
+        if (limitError(firstErrNo)) {
+            debugs(50, DBG_IMPORTANT, MYNAME << "socket failure: " << xstrerr(firstErrNo));
             fdAdjustReserved();
         } else {
-            debugs(50, DBG_CRITICAL, MYNAME << "socket failure: " << xstrerr(xerrno));
+            debugs(50, DBG_CRITICAL, MYNAME << "socket failure: " << xstrerr(firstErrNo));
         }
 
         Ip::Address::FreeAddr(AI);
 
-        PROF_stop(comm_open);
-        errno = xerrno; // restore for caller
+        errno = firstErrNo; // restore for caller
         return -1;
     }
 
@@ -405,11 +434,11 @@ comm_openex(int sock_type,
 
     Ip::Address::FreeAddr(AI);
 
-    PROF_stop(comm_open);
-
     // XXX transition only. prevent conn from closing the new FD on function exit.
     conn->fd = -1;
-    errno = xerrno; // restore for caller
+    // XXX: firstErrNo is not applicable here -- socket() calls succeeded above!
+    // TODO: Stop reporting error codes via errno.
+    errno = firstErrNo;
     return new_socket;
 }
 
@@ -423,13 +452,10 @@ comm_init_opened(const Comm::ConnectionPointer &conn,
     assert(AI);
 
     /* update fdstat */
-    debugs(5, 5, HERE << conn << " is a new socket");
+    debugs(5, 5, conn << " is a new socket");
 
     assert(!isOpen(conn->fd)); // NP: global isOpen checks the fde entry for openness not the Comm::Connection
     fd_open(conn->fd, FD_SOCKET, note);
-
-    fdd_table[conn->fd].close_file = NULL;
-    fdd_table[conn->fd].close_line = 0;
 
     fde *F = &fd_table[conn->fd];
     F->local_addr = conn->local;
@@ -474,7 +500,25 @@ comm_apply_flags(int new_socket,
         if ( !(flags & COMM_DOBIND) && addr.isAnyAddr() )
             debugs(5, DBG_IMPORTANT,"WARNING: Squid is attempting to bind() port " << addr << " without being a listener.");
         if ( addr.isNoAddr() )
-            debugs(5,0,"CRITICAL: Squid is attempting to bind() port " << addr << "!!");
+            debugs(5, DBG_CRITICAL, "ERROR: Squid is attempting to bind() port " << addr << "!!");
+
+#if defined(SO_REUSEPORT)
+        if (flags & COMM_REUSEPORT) {
+            int on = 1;
+            if (setsockopt(new_socket, SOL_SOCKET, SO_REUSEPORT, reinterpret_cast<char*>(&on), sizeof(on)) < 0) {
+                const auto savedErrno = errno;
+                const auto errorMessage = ToSBuf("cannot enable SO_REUSEPORT socket option when binding to ",
+                                                 addr, ": ", xstrerr(savedErrno));
+                if (reconfiguring)
+                    debugs(5, DBG_IMPORTANT, "ERROR: " << errorMessage);
+                else
+                    throw TexcHere(errorMessage);
+            }
+        }
+#endif
+
+        if ((flags & COMM_DOBIND_PORT_LATER))
+            commSetBindAddressNoPort(new_socket);
 
         if (commBind(new_socket, *AI) != Comm::OK) {
             comm_close(new_socket);
@@ -505,7 +549,7 @@ comm_import_opened(const Comm::ConnectionPointer &conn,
                    const char *note,
                    struct addrinfo *AI)
 {
-    debugs(5, 2, HERE << conn);
+    debugs(5, 2, conn);
     assert(Comm::IsConnOpen(conn));
     assert(AI);
 
@@ -543,30 +587,30 @@ comm_import_opened(const Comm::ConnectionPointer &conn,
 void
 commUnsetFdTimeout(int fd)
 {
-    debugs(5, 3, HERE << "Remove timeout for FD " << fd);
+    debugs(5, 3, "Remove timeout for FD " << fd);
     assert(fd >= 0);
     assert(fd < Squid_MaxFD);
     fde *F = &fd_table[fd];
     assert(F->flags.open);
 
-    F->timeoutHandler = NULL;
+    F->timeoutHandler = nullptr;
     F->timeout = 0;
 }
 
 int
-commSetConnTimeout(const Comm::ConnectionPointer &conn, int timeout, AsyncCall::Pointer &callback)
+commSetConnTimeout(const Comm::ConnectionPointer &conn, time_t timeout, AsyncCall::Pointer &callback)
 {
-    debugs(5, 3, HERE << conn << " timeout " << timeout);
+    debugs(5, 3, conn << " timeout " << timeout);
     assert(Comm::IsConnOpen(conn));
     assert(conn->fd < Squid_MaxFD);
     fde *F = &fd_table[conn->fd];
     assert(F->flags.open);
 
     if (timeout < 0) {
-        F->timeoutHandler = NULL;
+        F->timeoutHandler = nullptr;
         F->timeout = 0;
     } else {
-        if (callback != NULL) {
+        if (callback != nullptr) {
             typedef CommTimeoutCbParams Params;
             Params &params = GetCommParams<Params>(callback);
             params.conn = conn;
@@ -582,7 +626,7 @@ commSetConnTimeout(const Comm::ConnectionPointer &conn, int timeout, AsyncCall::
 int
 commUnsetConnTimeout(const Comm::ConnectionPointer &conn)
 {
-    debugs(5, 3, HERE << "Remove timeout for " << conn);
+    debugs(5, 3, "Remove timeout for " << conn);
     AsyncCall::Pointer nil;
     return commSetConnTimeout(conn, -1, nil);
 }
@@ -600,12 +644,11 @@ comm_connect_addr(int sock, const Ip::Address &address)
     int x = 0;
     int err = 0;
     socklen_t errlen;
-    struct addrinfo *AI = NULL;
-    PROF_start(comm_connect_addr);
+    struct addrinfo *AI = nullptr;
 
     assert(address.port() != 0);
 
-    debugs(5, 9, HERE << "connecting socket FD " << sock << " to " << address << " (want family: " << F->sock_family << ")");
+    debugs(5, 9, "connecting socket FD " << sock << " to " << address << " (want family: " << F->sock_family << ")");
 
     /* Handle IPv6 over IPv4-only socket case.
      * this case must presently be handled here since the getAddrInfo asserts on bad mappings.
@@ -621,7 +664,7 @@ comm_connect_addr(int sock, const Ip::Address &address)
      * This case is presently handled here as it's both a known case and it's
      * uncertain what error will be returned by the IPv6 stack in such case. It's
      * possible this will also be handled by the errno checks below after connect()
-     * but needs carefull cross-platform verification, and verifying the address
+     * but needs careful cross-platform verification, and verifying the address
      * condition here is simple.
      */
     if (!F->local_addr.isIPv4() && address.isIPv4()) {
@@ -694,8 +737,6 @@ comm_connect_addr(int sock, const Ip::Address &address)
 
     Ip::Address::FreeAddr(AI);
 
-    PROF_stop(comm_connect_addr);
-
     errno = xerrno;
     if (xerrno == 0 || xerrno == EISCONN)
         status = Comm::OK;
@@ -726,68 +767,21 @@ commCallCloseHandlers(int fd)
     fde *F = &fd_table[fd];
     debugs(5, 5, "commCallCloseHandlers: FD " << fd);
 
-    while (F->closeHandler != NULL) {
+    while (F->closeHandler != nullptr) {
         AsyncCall::Pointer call = F->closeHandler;
         F->closeHandler = call->Next();
-        call->setNext(NULL);
+        call->setNext(nullptr);
         // If call is not canceled schedule it for execution else ignore it
         if (!call->canceled()) {
             debugs(5, 5, "commCallCloseHandlers: ch->handler=" << call);
+            // XXX: Without the following code, callback fd may be -1.
+            // typedef CommCloseCbParams Params;
+            // auto &params = GetCommParams<Params>(call);
+            // params.fd = fd;
             ScheduleCallHere(call);
         }
     }
 }
-
-#if LINGERING_CLOSE
-static void
-commLingerClose(int fd, void *unused)
-{
-    LOCAL_ARRAY(char, buf, 1024);
-    int n = FD_READ_METHOD(fd, buf, 1024);
-    if (n < 0) {
-        int xerrno = errno;
-        debugs(5, 3, "FD " << fd << " read: " << xstrerr(xerrno));
-    }
-    comm_close(fd);
-}
-
-static void
-commLingerTimeout(const FdeCbParams &params)
-{
-    debugs(5, 3, "commLingerTimeout: FD " << params.fd);
-    comm_close(params.fd);
-}
-
-/*
- * Inspired by apache
- */
-void
-comm_lingering_close(int fd)
-{
-    Security::SessionSendGoodbye(fd_table[fd].ssl);
-
-    if (shutdown(fd, 1) < 0) {
-        comm_close(fd);
-        return;
-    }
-
-    fd_note(fd, "lingering close");
-    AsyncCall::Pointer call = commCbCall(5,4, "commLingerTimeout", FdeCbPtrFun(commLingerTimeout, NULL));
-
-    debugs(5, 3, HERE << "FD " << fd << " timeout " << timeout);
-    assert(fd_table[fd].flags.open);
-    if (callback != NULL) {
-        typedef FdeCbParams Params;
-        Params &params = GetCommParams<Params>(callback);
-        params.fd = fd;
-        fd_table[fd].timeoutHandler = callback;
-        fd_table[fd].timeout = squid_curtime + static_cast<time_t>(10);
-    }
-
-    Comm::SetSelect(fd, COMM_SELECT_READ, commLingerClose, NULL, 0);
-}
-
-#endif
 
 /**
  * enable linger with time of 0 so that when the socket is
@@ -822,24 +816,25 @@ old_comm_reset_close(int fd)
     comm_close(fd);
 }
 
-void
-commStartTlsClose(const FdeCbParams &params)
+static void
+commStartTlsClose(const int fd)
 {
-    Security::SessionSendGoodbye(fd_table[params.fd].ssl);
+    Security::SessionSendGoodbye(fd_table[fd].ssl);
 }
 
-void
-comm_close_complete(const FdeCbParams &params)
+static void
+comm_close_complete(const int fd)
 {
-    fde *F = &fd_table[params.fd];
+    auto F = &fd_table[fd];
     F->ssl.reset();
     F->dynamicTlsContext.reset();
-    fd_close(params.fd);        /* update fdstat */
-    close(params.fd);
+    fd_close(fd); /* update fdstat */
+    close(fd);
 
     ++ statCounter.syscalls.sock.closes;
 
     /* When one connection closes, give accept() a chance, if need be */
+    CodeContext::Reset(); // exit FD-specific context
     Comm::AcceptLimiter::Instance().kick();
 }
 
@@ -850,19 +845,17 @@ comm_close_complete(const FdeCbParams &params)
  * + call read handlers with ERR_CLOSING
  * + call closing handlers
  *
- * NOTE: Comm::ERR_CLOSING will NOT be called for CommReads' sitting in a
- * DeferredReadManager.
+ * A deferred reader has no Comm read handler mentioned above. To stay in sync,
+ * such a reader must register a Comm closing handler.
  */
 void
 _comm_close(int fd, char const *file, int line)
 {
-    debugs(5, 3, "comm_close: start closing FD " << fd);
+    debugs(5, 3, "start closing FD " << fd << " by " << file << ":" << line);
     assert(fd >= 0);
     assert(fd < Squid_MaxFD);
 
     fde *F = &fd_table[fd];
-    fdd_table[fd].close_file = file;
-    fdd_table[fd].close_line = line;
 
     if (F->closing())
         return;
@@ -873,22 +866,23 @@ _comm_close(int fd, char const *file, int line)
 
     /* The following fails because ipc.c is doing calls to pipe() to create sockets! */
     if (!isOpen(fd)) {
-        debugs(50, DBG_IMPORTANT, HERE << "BUG 3556: FD " << fd << " is not an open socket.");
+        debugs(50, DBG_IMPORTANT, "ERROR: Squid BUG #3556: FD " << fd << " is not an open socket.");
         // XXX: do we need to run close(fd) or fd_close(fd) here?
         return;
     }
 
     assert(F->type != FD_FILE);
 
-    PROF_start(comm_close);
-
     F->flags.close_request = true;
 
+    // We have caller's context and fde::codeContext. In the unlikely event they
+    // differ, it is not clear which context is more applicable to this closure.
+    // For simplicity sake, we remain in the caller's context while still
+    // allowing individual advanced callbacks to overwrite it.
+
     if (F->ssl) {
-        AsyncCall::Pointer startCall=commCbCall(5,4, "commStartTlsClose",
-                                                FdeCbPtrFun(commStartTlsClose, nullptr));
-        FdeCbParams &startParams = GetCommParams<FdeCbParams>(startCall);
-        startParams.fd = fd;
+        const auto startCall = asyncCall(5, 4, "commStartTlsClose",
+                                         callDialer(commStartTlsClose, fd));
         ScheduleCallHere(startCall);
     }
 
@@ -899,21 +893,18 @@ _comm_close(int fd, char const *file, int line)
 
     // notify read/write handlers after canceling select reservations, if any
     if (COMMIO_FD_WRITECB(fd)->active()) {
-        Comm::SetSelect(fd, COMM_SELECT_WRITE, NULL, NULL, 0);
-        COMMIO_FD_WRITECB(fd)->finish(Comm::ERR_CLOSING, errno);
+        Comm::SetSelect(fd, COMM_SELECT_WRITE, nullptr, nullptr, 0);
+        COMMIO_FD_WRITECB(fd)->finish(Comm::ERR_CLOSING, 0);
     }
     if (COMMIO_FD_READCB(fd)->active()) {
-        Comm::SetSelect(fd, COMM_SELECT_READ, NULL, NULL, 0);
-        COMMIO_FD_READCB(fd)->finish(Comm::ERR_CLOSING, errno);
+        Comm::SetSelect(fd, COMM_SELECT_READ, nullptr, nullptr, 0);
+        COMMIO_FD_READCB(fd)->finish(Comm::ERR_CLOSING, 0);
     }
 
 #if USE_DELAY_POOLS
-    if (ClientInfo *clientInfo = F->clientInfo) {
-        if (clientInfo->selectWaiting) {
-            clientInfo->selectWaiting = false;
-            // kick queue or it will get stuck as commWriteHandle is not called
-            clientInfo->kickQuotaQueue();
-        }
+    if (BandwidthBucket *bucket = BandwidthBucket::SelectBucket(F)) {
+        if (bucket->selectWaiting)
+            bucket->onFdClosed();
     }
 #endif
 
@@ -921,15 +912,11 @@ _comm_close(int fd, char const *file, int line)
 
     comm_empty_os_read_buffers(fd);
 
-    AsyncCall::Pointer completeCall=commCbCall(5,4, "comm_close_complete",
-                                    FdeCbPtrFun(comm_close_complete, NULL));
-    FdeCbParams &completeParams = GetCommParams<FdeCbParams>(completeCall);
-    completeParams.fd = fd;
     // must use async call to wait for all callbacks
     // scheduled before comm_close() to finish
+    const auto completeCall = asyncCall(5, 4, "comm_close_complete",
+                                        callDialer(comm_close_complete, fd));
     ScheduleCallHere(completeCall);
-
-    PROF_stop(comm_close);
 }
 
 /* Send a udp datagram to specified TO_ADDR. */
@@ -939,19 +926,16 @@ comm_udp_sendto(int fd,
                 const void *buf,
                 int len)
 {
-    PROF_start(comm_udp_sendto);
     ++ statCounter.syscalls.sock.sendtos;
 
     debugs(50, 3, "comm_udp_sendto: Attempt to send UDP packet to " << to_addr <<
            " using FD " << fd << " using Port " << comm_local_port(fd) );
 
-    struct addrinfo *AI = NULL;
+    struct addrinfo *AI = nullptr;
     to_addr.getAddrInfo(AI, fd_table[fd].sock_family);
     int x = sendto(fd, buf, len, 0, AI->ai_addr, AI->ai_addrlen);
     int xerrno = errno;
     Ip::Address::FreeAddr(AI);
-
-    PROF_stop(comm_udp_sendto);
 
     if (x >= 0) {
         errno = xerrno; // restore for caller to use
@@ -988,6 +972,8 @@ comm_add_close_handler(int fd, AsyncCall::Pointer &call)
 //    for (c = fd_table[fd].closeHandler; c; c = c->next)
 //        assert(c->handler != handler || c->data != data);
 
+    // TODO: Consider enhancing AsyncCallList to support random-access close
+    // handlers, perhaps after upgrading the remaining legacy CLCB handlers.
     call->setNext(fd_table[fd].closeHandler);
 
     fd_table[fd].closeHandler = call;
@@ -1002,8 +988,8 @@ comm_remove_close_handler(int fd, CLCB * handler, void *data)
     debugs(5, 5, "comm_remove_close_handler: FD " << fd << ", handler=" <<
            handler << ", data=" << data);
 
-    AsyncCall::Pointer p, prev = NULL;
-    for (p = fd_table[fd].closeHandler; p != NULL; prev = p, p = p->Next()) {
+    AsyncCall::Pointer p, prev = nullptr;
+    for (p = fd_table[fd].closeHandler; p != nullptr; prev = p, p = p->Next()) {
         typedef CommCbFunPtrCallT<CommCloseCbPtrFun> Call;
         const Call *call = dynamic_cast<const Call*>(p.getRaw());
         if (!call) // method callbacks have their own comm_remove_close_handler
@@ -1016,7 +1002,7 @@ comm_remove_close_handler(int fd, CLCB * handler, void *data)
     }
 
     // comm_close removes all close handlers so our handler may be gone
-    if (p != NULL) {
+    if (p != nullptr) {
         p->dequeue(fd_table[fd].closeHandler, prev);
         p->cancel("comm_remove_close_handler");
     }
@@ -1030,10 +1016,10 @@ comm_remove_close_handler(int fd, AsyncCall::Pointer &call)
     debugs(5, 5, "comm_remove_close_handler: FD " << fd << ", AsyncCall=" << call);
 
     // comm_close removes all close handlers so our handler may be gone
-    AsyncCall::Pointer p, prev = NULL;
-    for (p = fd_table[fd].closeHandler; p != NULL && p != call; prev = p, p = p->Next());
+    AsyncCall::Pointer p, prev = nullptr;
+    for (p = fd_table[fd].closeHandler; p != nullptr && p != call; prev = p, p = p->Next());
 
-    if (p != NULL)
+    if (p != nullptr)
         p->dequeue(fd_table[fd].closeHandler, prev);
     call->cancel("comm_remove_close_handler");
 }
@@ -1158,7 +1144,7 @@ commSetCloseOnExec(int fd)
 
     if (fcntl(fd, F_SETFD, flags | FD_CLOEXEC) < 0) {
         int xerrno = errno;
-        debugs(50, DBG_CRITICAL, MYNAME << "FD " << fd << ": set close-on-exec failed: " << xstrerr(xerrno));
+        debugs(50, DBG_CRITICAL, "ERROR: " << MYNAME << "FD " << fd << ": set close-on-exec failed: " << xstrerr(xerrno));
     }
 
     fd_table[fd].flags.close_on_exec = true;
@@ -1183,45 +1169,9 @@ commSetTcpNoDelay(int fd)
 #endif
 
 void
-commSetTcpKeepalive(int fd, int idle, int interval, int timeout)
-{
-    int on = 1;
-#ifdef TCP_KEEPCNT
-    if (timeout && interval) {
-        int count = (timeout + interval - 1) / interval;
-        if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &count, sizeof(on)) < 0) {
-            int xerrno = errno;
-            debugs(5, DBG_IMPORTANT, MYNAME << "FD " << fd << ": " << xstrerr(xerrno));
-        }
-    }
-#endif
-#ifdef TCP_KEEPIDLE
-    if (idle) {
-        if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(on)) < 0) {
-            int xerrno = errno;
-            debugs(5, DBG_IMPORTANT, MYNAME << "FD " << fd << ": " << xstrerr(xerrno));
-        }
-    }
-#endif
-#ifdef TCP_KEEPINTVL
-    if (interval) {
-        if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(on)) < 0) {
-            int xerrno = errno;
-            debugs(5, DBG_IMPORTANT, MYNAME << "FD " << fd << ": " << xstrerr(xerrno));
-        }
-    }
-#endif
-    if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (char *) &on, sizeof(on)) < 0) {
-        int xerrno = errno;
-        debugs(5, DBG_IMPORTANT, MYNAME << "FD " << fd << ": " << xstrerr(xerrno));
-    }
-}
-
-void
 comm_init(void)
 {
-    fd_table =(fde *) xcalloc(Squid_MaxFD, sizeof(fde));
-    fdd_table = (fd_debug_t *)xcalloc(Squid_MaxFD, sizeof(fd_debug_t));
+    assert(fd_table);
 
     /* make sure the accept() socket FIFO delay queue exists */
     Comm::AcceptLimiter::Instance();
@@ -1245,10 +1195,8 @@ void
 comm_exit(void)
 {
     delete TheHalfClosed;
-    TheHalfClosed = NULL;
+    TheHalfClosed = nullptr;
 
-    safe_free(fd_table);
-    safe_free(fdd_table);
     Comm::CallbackTableDestruct();
 }
 
@@ -1266,30 +1214,38 @@ commHandleWriteHelper(void * data)
     assert(clientInfo);
     assert(clientInfo->hasQueue());
     assert(clientInfo->hasQueue(queue));
-    assert(!clientInfo->selectWaiting);
     assert(clientInfo->eventWaiting);
     clientInfo->eventWaiting = false;
 
     do {
-        // check that the head descriptor is still relevant
-        const int head = clientInfo->quotaPeekFd();
-        Comm::IoCallback *ccb = COMMIO_FD_WRITECB(head);
+        clientInfo->writeOrDequeue();
+        if (clientInfo->selectWaiting)
+            return;
+    } while (clientInfo->hasQueue());
 
-        if (fd_table[head].clientInfo == clientInfo &&
-                clientInfo->quotaPeekReserv() == ccb->quotaQueueReserv &&
-                !fd_table[head].closing()) {
+    debugs(77, 3, "emptied queue");
+}
+
+void
+ClientInfo::writeOrDequeue()
+{
+    assert(!selectWaiting);
+    const auto head = quotaPeekFd();
+    const auto &headFde = fd_table[head];
+    CallBack(headFde.codeContext, [&] {
+        const auto ccb = COMMIO_FD_WRITECB(head);
+        // check that the head descriptor is still relevant
+        if (headFde.clientInfo == this &&
+                quotaPeekReserv() == ccb->quotaQueueReserv &&
+                !headFde.closing()) {
 
             // wait for the head descriptor to become ready for writing
             Comm::SetSelect(head, COMM_SELECT_WRITE, Comm::HandleWrite, ccb, 0);
-            clientInfo->selectWaiting = true;
-            return;
+            selectWaiting = true;
+        } else {
+            quotaDequeue(); // remove the no longer relevant descriptor
         }
-
-        clientInfo->quotaDequeue(); // remove the no longer relevant descriptor
-        // and continue looking for a relevant one
-    } while (clientInfo->hasQueue());
-
-    debugs(77,3, HERE << "emptied queue");
+    });
 }
 
 bool
@@ -1343,7 +1299,7 @@ ClientInfo::kickQuotaQueue()
 {
     if (!eventWaiting && !selectWaiting && hasQueue()) {
         // wait at least a second if the bucket is empty
-        const double delay = (bucketSize < 1.0) ? 1.0 : 0.0;
+        const double delay = (bucketLevel < 1.0) ? 1.0 : 0.0;
         eventAdd("commHandleWriteHelper", &commHandleWriteHelper,
                  quotaQueue, delay, 0, true);
         eventWaiting = true;
@@ -1352,7 +1308,7 @@ ClientInfo::kickQuotaQueue()
 
 /// calculates how much to write for a single dequeued client
 int
-ClientInfo::quotaForDequed()
+ClientInfo::quota()
 {
     /* If we have multiple clients and give full bucketSize to each client then
      * clt1 may often get a lot more because clt1->clt2 time distance in the
@@ -1368,13 +1324,13 @@ ClientInfo::quotaForDequed()
 
         // Rounding errors do not accumulate here, but we round down to avoid
         // negative bucket sizes after write with rationedCount=1.
-        rationedQuota = static_cast<int>(floor(bucketSize/rationedCount));
-        debugs(77,5, HERE << "new rationedQuota: " << rationedQuota <<
+        rationedQuota = static_cast<int>(floor(bucketLevel/rationedCount));
+        debugs(77,5, "new rationedQuota: " << rationedQuota <<
                '*' << rationedCount);
     }
 
     --rationedCount;
-    debugs(77,7, HERE << "rationedQuota: " << rationedQuota <<
+    debugs(77,7, "rationedQuota: " << rationedQuota <<
            " rations remaining: " << rationedCount);
 
     // update 'last seen' time to prevent clientdb GC from dropping us
@@ -1382,48 +1338,50 @@ ClientInfo::quotaForDequed()
     return rationedQuota;
 }
 
-///< adds bytes to the quota bucket based on the rate and passed time
-void
-ClientInfo::refillBucket()
+bool
+ClientInfo::applyQuota(int &nleft, Comm::IoCallback *state)
 {
-    // all these times are in seconds, with double precision
-    const double currTime = current_dtime;
-    const double timePassed = currTime - prevTime;
-
-    // Calculate allowance for the time passed. Use double to avoid
-    // accumulating rounding errors for small intervals. For example, always
-    // adding 1 byte instead of 1.4 results in 29% bandwidth allocation error.
-    const double gain = timePassed * writeSpeedLimit;
-
-    debugs(77,5, HERE << currTime << " clt" << (const char*)hash.key << ": " <<
-           bucketSize << " + (" << timePassed << " * " << writeSpeedLimit <<
-           " = " << gain << ')');
-
-    // to further combat error accumulation during micro updates,
-    // quit before updating time if we cannot add at least one byte
-    if (gain < 1.0)
-        return;
-
-    prevTime = currTime;
-
-    // for "first" connections, drain initial fat before refilling but keep
-    // updating prevTime to avoid bursts after the fat is gone
-    if (bucketSize > bucketSizeLimit) {
-        debugs(77,4, HERE << "not refilling while draining initial fat");
-        return;
+    assert(hasQueue());
+    assert(quotaPeekFd() == state->conn->fd);
+    quotaDequeue(); // we will write or requeue below
+    if (nleft > 0 && !BandwidthBucket::applyQuota(nleft, state)) {
+        state->quotaQueueReserv = quotaEnqueue(state->conn->fd);
+        kickQuotaQueue();
+        return false;
     }
+    return true;
+}
 
-    bucketSize += gain;
+void
+ClientInfo::scheduleWrite(Comm::IoCallback *state)
+{
+    if (writeLimitingActive) {
+        state->quotaQueueReserv = quotaEnqueue(state->conn->fd);
+        kickQuotaQueue();
+    }
+}
 
-    // obey quota limits
-    if (bucketSize > bucketSizeLimit)
-        bucketSize = bucketSizeLimit;
+void
+ClientInfo::onFdClosed()
+{
+    BandwidthBucket::onFdClosed();
+    // kick queue or it will get stuck as commWriteHandle is not called
+    kickQuotaQueue();
+}
+
+void
+ClientInfo::reduceBucket(const int len)
+{
+    if (len > 0)
+        BandwidthBucket::reduceBucket(len);
+    // even if we wrote nothing, we were served; give others a chance
+    kickQuotaQueue();
 }
 
 void
 ClientInfo::setWriteLimiter(const int aWriteSpeedLimit, const double anInitialBurst, const double aHighWatermark)
 {
-    debugs(77,5, HERE << "Write limits for " << (const char*)hash.key <<
+    debugs(77,5, "Write limits for " << (const char*)key <<
            " speed=" << aWriteSpeedLimit << " burst=" << anInitialBurst <<
            " highwatermark=" << aHighWatermark);
 
@@ -1440,7 +1398,7 @@ ClientInfo::setWriteLimiter(const int aWriteSpeedLimit, const double anInitialBu
         assert(!quotaQueue);
         quotaQueue = new CommQuotaQueue(this);
 
-        bucketSize = anInitialBurst;
+        bucketLevel = anInitialBurst;
         prevTime = current_dtime;
     }
 }
@@ -1460,9 +1418,10 @@ CommQuotaQueue::~CommQuotaQueue()
 unsigned int
 CommQuotaQueue::enqueue(int fd)
 {
-    debugs(77,5, HERE << "clt" << (const char*)clientInfo->hash.key <<
+    debugs(77,5, "clt" << (const char*)clientInfo->key <<
            ": FD " << fd << " with qqid" << (ins+1) << ' ' << fds.size());
     fds.push_back(fd);
+    fd_table[fd].codeContext = CodeContext::Current();
     return ++ins;
 }
 
@@ -1471,13 +1430,13 @@ void
 CommQuotaQueue::dequeue()
 {
     assert(!fds.empty());
-    debugs(77,5, HERE << "clt" << (const char*)clientInfo->hash.key <<
+    debugs(77,5, "clt" << (const char*)clientInfo->key <<
            ": FD " << fds.front() << " with qqid" << (outs+1) << ' ' <<
            fds.size());
     fds.pop_front();
     ++outs;
 }
-#endif
+#endif /* USE_DELAY_POOLS */
 
 /*
  * hm, this might be too general-purpose for all the places we'd
@@ -1517,7 +1476,7 @@ void
 commCloseAllSockets(void)
 {
     int fd;
-    fde *F = NULL;
+    fde *F = nullptr;
 
     for (fd = 0; fd <= Biggest_FD; ++fd) {
         F = &fd_table[fd];
@@ -1531,9 +1490,9 @@ commCloseAllSockets(void)
         if (F->flags.ipc)   /* don't close inter-process sockets */
             continue;
 
-        if (F->timeoutHandler != NULL) {
+        if (F->timeoutHandler != nullptr) {
             AsyncCall::Pointer callback = F->timeoutHandler;
-            F->timeoutHandler = NULL;
+            F->timeoutHandler = nullptr;
             debugs(5, 5, "commCloseAllSockets: FD " << fd << ": Calling timeout handler");
             ScheduleCallHere(callback);
         } else {
@@ -1574,7 +1533,7 @@ void
 checkTimeouts(void)
 {
     int fd;
-    fde *F = NULL;
+    fde *F = nullptr;
     AsyncCall::Pointer callback;
 
     for (fd = 0; fd <= Biggest_FD; ++fd) {
@@ -1582,24 +1541,41 @@ checkTimeouts(void)
 
         if (writeTimedOut(fd)) {
             // We have an active write callback and we are timed out
+            CodeContext::Reset(F->codeContext);
             debugs(5, 5, "checkTimeouts: FD " << fd << " auto write timeout");
-            Comm::SetSelect(fd, COMM_SELECT_WRITE, NULL, NULL, 0);
+            Comm::SetSelect(fd, COMM_SELECT_WRITE, nullptr, nullptr, 0);
             COMMIO_FD_WRITECB(fd)->finish(Comm::COMM_ERROR, ETIMEDOUT);
+            CodeContext::Reset();
             continue;
-        } else if (AlreadyTimedOut(F))
+#if USE_DELAY_POOLS
+        } else if (F->writeQuotaHandler != nullptr && COMMIO_FD_WRITECB(fd)->conn != nullptr) {
+            // TODO: Move and extract quota() call to place it inside F->codeContext.
+            if (!F->writeQuotaHandler->selectWaiting && F->writeQuotaHandler->quota() && !F->closing()) {
+                CodeContext::Reset(F->codeContext);
+                F->writeQuotaHandler->selectWaiting = true;
+                Comm::SetSelect(fd, COMM_SELECT_WRITE, Comm::HandleWrite, COMMIO_FD_WRITECB(fd), 0);
+                CodeContext::Reset();
+            }
+            continue;
+#endif
+        }
+        else if (AlreadyTimedOut(F))
             continue;
 
+        CodeContext::Reset(F->codeContext);
         debugs(5, 5, "checkTimeouts: FD " << fd << " Expired");
 
-        if (F->timeoutHandler != NULL) {
+        if (F->timeoutHandler != nullptr) {
             debugs(5, 5, "checkTimeouts: FD " << fd << ": Call timeout handler");
             callback = F->timeoutHandler;
-            F->timeoutHandler = NULL;
+            F->timeoutHandler = nullptr;
             ScheduleCallHere(callback);
         } else {
             debugs(5, 5, "checkTimeouts: FD " << fd << ": Forcing comm_close()");
             comm_close(fd);
         }
+
+        CodeContext::Reset();
     }
 }
 
@@ -1609,9 +1585,10 @@ checkTimeouts(void)
 void
 commStartHalfClosedMonitor(int fd)
 {
-    debugs(5, 5, HERE << "adding FD " << fd << " to " << *TheHalfClosed);
+    debugs(5, 5, "adding FD " << fd << " to " << *TheHalfClosed);
     assert(isOpen(fd) && !commHasHalfClosedMonitor(fd));
     (void)TheHalfClosed->add(fd); // could also assert the result
+    fd_table[fd].codeContext = CodeContext::Current();
     commPlanHalfClosedCheck(); // may schedule check if we added the first FD
 }
 
@@ -1620,7 +1597,7 @@ void
 commPlanHalfClosedCheck()
 {
     if (!WillCheckHalfClosed && !TheHalfClosed->empty()) {
-        eventAdd("commHalfClosedCheck", &commHalfClosedCheck, NULL, 1.0, 1);
+        eventAdd("commHalfClosedCheck", &commHalfClosedCheck, nullptr, 1.0, 1);
         WillCheckHalfClosed = true;
     }
 }
@@ -1631,7 +1608,7 @@ static
 void
 commHalfClosedCheck(void *)
 {
-    debugs(5, 5, HERE << "checking " << *TheHalfClosed);
+    debugs(5, 5, "checking " << *TheHalfClosed);
 
     typedef DescriptorSet::const_iterator DSCI;
     const DSCI end = TheHalfClosed->end();
@@ -1639,10 +1616,12 @@ commHalfClosedCheck(void *)
         Comm::ConnectionPointer c = new Comm::Connection; // XXX: temporary. make HalfClosed a list of these.
         c->fd = *i;
         if (!fd_table[c->fd].halfClosedReader) { // not reading already
-            AsyncCall::Pointer call = commCbCall(5,4, "commHalfClosedReader",
-                                                 CommIoCbPtrFun(&commHalfClosedReader, NULL));
-            Comm::Read(c, call);
-            fd_table[c->fd].halfClosedReader = call;
+            CallBack(fd_table[c->fd].codeContext, [&c] {
+                AsyncCall::Pointer call = commCbCall(5,4, "commHalfClosedReader",
+                                                     CommIoCbPtrFun(&commHalfClosedReader, nullptr));
+                Comm::Read(c, call);
+                fd_table[c->fd].halfClosedReader = call;
+            });
         } else
             c->fd = -1; // XXX: temporary. prevent c replacement erase closing listed FD
     }
@@ -1663,13 +1642,13 @@ commHasHalfClosedMonitor(int fd)
 void
 commStopHalfClosedMonitor(int const fd)
 {
-    debugs(5, 5, HERE << "removing FD " << fd << " from " << *TheHalfClosed);
+    debugs(5, 5, "removing FD " << fd << " from " << *TheHalfClosed);
 
     // cancel the read if one was scheduled
     AsyncCall::Pointer reader = fd_table[fd].halfClosedReader;
-    if (reader != NULL)
+    if (reader != nullptr)
         Comm::ReadCancel(fd, reader);
-    fd_table[fd].halfClosedReader = NULL;
+    fd_table[fd].halfClosedReader = nullptr;
 
     TheHalfClosed->del(fd);
 }
@@ -1680,10 +1659,10 @@ commHalfClosedReader(const Comm::ConnectionPointer &conn, char *, size_t size, C
 {
     // there cannot be more data coming in on half-closed connections
     assert(size == 0);
-    assert(conn != NULL);
+    assert(conn != nullptr);
     assert(commHasHalfClosedMonitor(conn->fd)); // or we would have canceled the read
 
-    fd_table[conn->fd].halfClosedReader = NULL; // done reading, for now
+    fd_table[conn->fd].halfClosedReader = nullptr; // done reading, for now
 
     // nothing to do if fd is being closed
     if (flag == Comm::ERR_CLOSING)
@@ -1691,147 +1670,13 @@ commHalfClosedReader(const Comm::ConnectionPointer &conn, char *, size_t size, C
 
     // if read failed, close the connection
     if (flag != Comm::OK) {
-        debugs(5, 3, HERE << "closing " << conn);
+        debugs(5, 3, "closing " << conn);
         conn->close();
         return;
     }
 
     // continue waiting for close or error
     commPlanHalfClosedCheck(); // make sure this fd will be checked again
-}
-
-CommRead::CommRead() : conn(NULL), buf(NULL), len(0), callback(NULL) {}
-
-CommRead::CommRead(const Comm::ConnectionPointer &c, char *buf_, int len_, AsyncCall::Pointer &callback_)
-    : conn(c), buf(buf_), len(len_), callback(callback_) {}
-
-DeferredRead::DeferredRead () : theReader(NULL), theContext(NULL), theRead(), cancelled(false) {}
-
-DeferredRead::DeferredRead (DeferrableRead *aReader, void *data, CommRead const &aRead) : theReader(aReader), theContext (data), theRead(aRead), cancelled(false) {}
-
-DeferredReadManager::~DeferredReadManager()
-{
-    flushReads();
-    assert (deferredReads.empty());
-}
-
-/* explicit instantiation required for some systems */
-
-/// \cond AUTODOCS_IGNORE
-template cbdata_type CbDataList<DeferredRead>::CBDATA_CbDataList;
-/// \endcond
-
-void
-DeferredReadManager::delayRead(DeferredRead const &aRead)
-{
-    debugs(5, 3, "Adding deferred read on " << aRead.theRead.conn);
-    CbDataList<DeferredRead> *temp = deferredReads.push_back(aRead);
-
-    // We have to use a global function as a closer and point to temp
-    // instead of "this" because DeferredReadManager is not a job and
-    // is not even cbdata protected
-    // XXX: and yet we use cbdata protection functions on it??
-    AsyncCall::Pointer closer = commCbCall(5,4,
-                                           "DeferredReadManager::CloseHandler",
-                                           CommCloseCbPtrFun(&CloseHandler, temp));
-    comm_add_close_handler(aRead.theRead.conn->fd, closer);
-    temp->element.closer = closer; // remeber so that we can cancel
-}
-
-void
-DeferredReadManager::CloseHandler(const CommCloseCbParams &params)
-{
-    if (!cbdataReferenceValid(params.data))
-        return;
-
-    CbDataList<DeferredRead> *temp = (CbDataList<DeferredRead> *)params.data;
-
-    temp->element.closer = NULL;
-    temp->element.markCancelled();
-}
-
-DeferredRead
-DeferredReadManager::popHead(CbDataListContainer<DeferredRead> &deferredReads)
-{
-    assert (!deferredReads.empty());
-
-    DeferredRead &read = deferredReads.head->element;
-
-    // NOTE: at this point the connection has been paused/stalled for an unknown
-    //       amount of time. We must re-validate that it is active and usable.
-
-    // If the connection has been closed already. Cancel this read.
-    if (!fd_table || !Comm::IsConnOpen(read.theRead.conn)) {
-        if (read.closer != NULL) {
-            read.closer->cancel("Connection closed before.");
-            read.closer = NULL;
-        }
-        read.markCancelled();
-    }
-
-    if (!read.cancelled) {
-        comm_remove_close_handler(read.theRead.conn->fd, read.closer);
-        read.closer = NULL;
-    }
-
-    DeferredRead result = deferredReads.pop_front();
-
-    return result;
-}
-
-void
-DeferredReadManager::kickReads(int const count)
-{
-    /* if we had CbDataList::size() we could consolidate this and flushReads */
-
-    if (count < 1) {
-        flushReads();
-        return;
-    }
-
-    size_t remaining = count;
-
-    while (!deferredReads.empty() && remaining) {
-        DeferredRead aRead = popHead(deferredReads);
-        kickARead(aRead);
-
-        if (!aRead.cancelled)
-            --remaining;
-    }
-}
-
-void
-DeferredReadManager::flushReads()
-{
-    CbDataListContainer<DeferredRead> reads;
-    reads = deferredReads;
-    deferredReads = CbDataListContainer<DeferredRead>();
-
-    // XXX: For fairness this SHOULD randomize the order
-    while (!reads.empty()) {
-        DeferredRead aRead = popHead(reads);
-        kickARead(aRead);
-    }
-}
-
-void
-DeferredReadManager::kickARead(DeferredRead const &aRead)
-{
-    if (aRead.cancelled)
-        return;
-
-    if (Comm::IsConnOpen(aRead.theRead.conn) && fd_table[aRead.theRead.conn->fd].closing())
-        return;
-
-    debugs(5, 3, "Kicking deferred read on " << aRead.theRead.conn);
-
-    aRead.theReader(aRead.theContext, aRead.theRead);
-}
-
-void
-DeferredRead::markCancelled()
-{
-    cancelled = true;
 }
 
 int
@@ -1877,7 +1722,6 @@ comm_open_uds(int sock_type,
 
     int new_socket;
 
-    PROF_start(comm_open);
     /* Create socket for accepting new connections. */
     ++ statCounter.syscalls.sock.sockets;
 
@@ -1889,10 +1733,10 @@ comm_open_uds(int sock_type,
     AI.ai_protocol = proto;
     AI.ai_addrlen = SUN_LEN(addr);
     AI.ai_addr = (sockaddr*)addr;
-    AI.ai_canonname = NULL;
-    AI.ai_next = NULL;
+    AI.ai_canonname = nullptr;
+    AI.ai_next = nullptr;
 
-    debugs(50, 3, HERE << "Attempt open socket for: " << addr->sun_path);
+    debugs(50, 3, "Attempt open socket for: " << addr->sun_path);
 
     if ((new_socket = socket(AI.ai_family, AI.ai_socktype, AI.ai_protocol)) < 0) {
         int xerrno = errno;
@@ -1906,22 +1750,16 @@ comm_open_uds(int sock_type,
         } else {
             debugs(50, DBG_CRITICAL, MYNAME << "socket failure: " << xstrerr(xerrno));
         }
-
-        PROF_stop(comm_open);
         return -1;
     }
 
     debugs(50, 3, "Opened UDS FD " << new_socket << " : family=" << AI.ai_family << ", type=" << AI.ai_socktype << ", protocol=" << AI.ai_protocol);
 
     /* update fdstat */
-    debugs(50, 5, HERE << "FD " << new_socket << " is a new socket");
+    debugs(50, 5, "FD " << new_socket << " is a new socket");
 
     assert(!isOpen(new_socket));
     fd_open(new_socket, FD_MSGHDR, addr->sun_path);
-
-    fdd_table[new_socket].close_file = NULL;
-
-    fdd_table[new_socket].close_line = 0;
 
     fd_table[new_socket].sock_family = AI.ai_family;
 
@@ -1934,7 +1772,6 @@ comm_open_uds(int sock_type,
     if (flags & COMM_NONBLOCKING) {
         if (commSetNonBlocking(new_socket) != Comm::OK) {
             comm_close(new_socket);
-            PROF_stop(comm_open);
             return -1;
         }
     }
@@ -1942,7 +1779,6 @@ comm_open_uds(int sock_type,
     if (flags & COMM_DOBIND) {
         if (commBind(new_socket, AI) != Comm::OK) {
             comm_close(new_socket);
-            PROF_stop(comm_open);
             return -1;
         }
     }
@@ -1955,8 +1791,6 @@ comm_open_uds(int sock_type,
 
     if (Config.tcpRcvBufsz > 0 && sock_type == SOCK_STREAM)
         commSetTcpRcvbuf(new_socket, Config.tcpRcvBufsz);
-
-    PROF_stop(comm_open);
 
     return new_socket;
 }

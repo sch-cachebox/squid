@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -12,7 +12,7 @@
 #include "acl/IntRange.h"
 #include "cache_cf.h"
 #include "ConfigParser.h"
-#include "Debug.h"
+#include "debug/Stream.h"
 #include "fatal.h"
 #include "Parsing.h"
 
@@ -39,7 +39,7 @@ ACLIntRange::parse()
             RangeType temp(port1, port2+1);
             ranges.push_back(temp);
         } else {
-            debugs(28, DBG_CRITICAL, "ACLIntRange::parse: Invalid port value");
+            debugs(28, DBG_CRITICAL, "ERROR: ACLIntRange::parse: Invalid port value");
             self_destruct();
         }
     }
@@ -55,24 +55,13 @@ bool
 ACLIntRange::match(int i)
 {
     RangeType const toFind(i, i+1);
-    for (std::list<RangeType>::const_iterator iter = ranges.begin(); iter != ranges.end(); ++iter) {
-        const RangeType & element = *iter;
+    for (const auto &element : ranges) {
         RangeType result = element.intersection(toFind);
-
         if (result.size())
             return true;
     }
 
     return false;
-}
-
-ACLData<int> *
-ACLIntRange::clone() const
-{
-    if (!ranges.empty())
-        fatal("ACLIntRange::clone: attempt to clone used ACL");
-
-    return new ACLIntRange(*this);
 }
 
 ACLIntRange::~ACLIntRange()
@@ -82,9 +71,8 @@ SBufList
 ACLIntRange::dump() const
 {
     SBufList sl;
-    for (std::list<RangeType>::const_iterator iter = ranges.begin(); iter != ranges.end(); ++iter) {
+    for (const auto &element : ranges) {
         SBuf sb;
-        const RangeType & element = *iter;
 
         if (element.size() == 1)
             sb.Printf("%d", element.start);

@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_ENUMS_H
-#define SQUID_ENUMS_H
+#ifndef SQUID_SRC_ENUMS_H
+#define SQUID_SRC_ENUMS_H
 
 enum fd_type {
     FD_NONE_TYPE,
@@ -17,11 +17,6 @@ enum fd_type {
     FD_PIPE,
     FD_MSGHDR,
     FD_UNKNOWN
-};
-
-enum {
-    FD_READ,
-    FD_WRITE
 };
 
 typedef enum {
@@ -37,8 +32,12 @@ typedef enum _mem_status_t {
 } mem_status_t;
 
 typedef enum {
+    /// Has not considered whether to send ICP queries to peers yet.
     PING_NONE,
+    /// Sent ICP queries to peers and still awaiting responses.
     PING_WAITING,
+    /// Not waiting for ICP responses now and will not send ICP queries later.
+    /// The ICP queries may (or may not) have been sent earlier.
     PING_DONE
 } ping_status_t;
 
@@ -108,7 +107,10 @@ enum {
     ENTRY_NEGCACHED,
     ENTRY_VALIDATED,
     ENTRY_BAD_LENGTH,
-    ENTRY_ABORTED
+    ENTRY_ABORTED,
+    /// Whether the entry serves collapsed hits now.
+    /// Meaningful only for public entries.
+    ENTRY_REQUIRES_COLLAPSING
 };
 
 /*
@@ -153,14 +155,6 @@ enum {
     STORE_LOG_SWAPOUTFAIL
 };
 
-/* parse state of HttpReply or HttpRequest */
-typedef enum {
-    psReadyToParseStartLine = 0,
-    psReadyToParseHeaders,
-    psParsed,
-    psError
-} HttpMsgParseState;
-
 enum {
     PCTILE_HTTP,
     PCTILE_ICP_QUERY,
@@ -203,10 +197,8 @@ enum {
 typedef enum {
     DIGEST_READ_NONE,
     DIGEST_READ_REPLY,
-    DIGEST_READ_HEADERS,
     DIGEST_READ_CBLOCK,
-    DIGEST_READ_MASK,
-    DIGEST_READ_DONE
+    DIGEST_READ_MASK
 } digest_read_state_t;
 
 /* CygWin & Windows NT Port */
@@ -245,5 +237,5 @@ typedef enum {
 } htcp_clr_reason;
 #endif /* USE_HTCP */
 
-#endif /* SQUID_ENUMS_H */
+#endif /* SQUID_SRC_ENUMS_H */
 

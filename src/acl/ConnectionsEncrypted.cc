@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -11,21 +11,12 @@
 #include "squid.h"
 #include "acl/ConnectionsEncrypted.h"
 #include "acl/FilledChecklist.h"
-#include "Debug.h"
+#include "debug/Stream.h"
 #include "HttpReply.h"
 #include "HttpRequest.h"
 #include "SquidConfig.h"
 
-ACL *
-Acl::ConnectionsEncrypted::clone() const
-{
-    return new Acl::ConnectionsEncrypted(*this);
-}
-
 Acl::ConnectionsEncrypted::ConnectionsEncrypted (char const *theClass) : class_ (theClass)
-{}
-
-Acl::ConnectionsEncrypted::ConnectionsEncrypted (Acl::ConnectionsEncrypted const & old) :class_ (old.class_)
 {}
 
 Acl::ConnectionsEncrypted::~ConnectionsEncrypted()
@@ -63,9 +54,9 @@ Acl::ConnectionsEncrypted::match(ACLChecklist *checklist)
     ACLFilledChecklist *filled = Filled((ACLChecklist*)checklist);
 
     const bool safeRequest =
-        !(filled->request->sources & HttpMsg::srcUnsafe);
-    const bool safeReply = !filled->reply ||
-                           !(filled->reply->sources & HttpMsg::srcUnsafe);
+        !(filled->request->sources & Http::Message::srcUnsafe);
+    const bool safeReply = !filled->hasReply() ||
+                           !(filled->reply().sources & Http::Message::srcUnsafe);
 
     return (safeRequest && safeReply) ? 1 : 0;
 }

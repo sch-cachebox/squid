@@ -1,15 +1,17 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_ACL_TREE_H
-#define SQUID_ACL_TREE_H
+#ifndef SQUID_SRC_ACL_TREE_H
+#define SQUID_SRC_ACL_TREE_H
 
+#include "acl/Acl.h"
 #include "acl/BoolOps.h"
+#include "cbdata.h"
 #include "sbuf/List.h"
 
 namespace Acl
@@ -30,27 +32,27 @@ public:
     SBufList treeDump(const char *name, ActionToStringConverter converter) const;
 
     /// Returns the corresponding action after a successful tree match.
-    allow_t winningAction() const;
+    Answer winningAction() const;
 
     /// what action to use if no nodes matched
-    allow_t lastAction() const;
+    Answer lastAction() const;
 
     /// appends and takes control over the rule with a given action
-    void add(ACL *rule, const allow_t &action);
-    void add(ACL *rule); ///< same as InnerNode::add()
+    void add(Acl::Node *rule, const Answer &action);
+    void add(Acl::Node *rule); ///< same as InnerNode::add()
 
 protected:
     /// Acl::OrNode API
-    virtual bool bannedAction(ACLChecklist *, Nodes::const_iterator) const override;
-    allow_t actionAt(const Nodes::size_type pos) const;
+    bool bannedAction(ACLChecklist *, Nodes::const_iterator) const override;
+    Answer actionAt(const Nodes::size_type pos) const;
 
     /// if not empty, contains actions corresponding to InnerNode::nodes
-    typedef std::vector<allow_t> Actions;
+    typedef std::vector<Answer> Actions;
     Actions actions;
 };
 
 inline const char *
-AllowOrDeny(const allow_t &action)
+AllowOrDeny(const Answer &action)
 {
     return action.allowed() ? "allow" : "deny";
 }
@@ -73,13 +75,7 @@ Tree::treeDump(const char *prefix, ActionToStringConverter converter) const
             ++action;
         }
 
-#if __cplusplus >= 201103L
         text.splice(text.end(), (*node)->dump());
-#else
-        // temp is needed until c++11 move constructor
-        SBufList temp = (*node)->dump();
-        text.splice(text.end(), temp);
-#endif
         text.push_back(SBuf("\n"));
     }
     return text;
@@ -87,5 +83,5 @@ Tree::treeDump(const char *prefix, ActionToStringConverter converter) const
 
 } // namespace Acl
 
-#endif /* SQUID_ACL_TREE_H */
+#endif /* SQUID_SRC_ACL_TREE_H */
 

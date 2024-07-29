@@ -1,4 +1,4 @@
-## Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+## Copyright (C) 1996-2023 The Squid Software Foundation and contributors
 ##
 ## Squid software is distributed under GPLv2+ license and includes
 ## contributions from numerous individuals and organizations.
@@ -6,7 +6,6 @@
 ##
 
 include $(top_srcdir)/src/Common.am
-include $(top_srcdir)/src/TestHeaders.am
 
 DIST_SUBDIRS= DB file
 SUBDIRS= $(LOG_DAEMON_HELPERS)
@@ -15,20 +14,21 @@ EXTRA_DIST= helpers.m4
 noinst_LTLIBRARIES = liblog.la
 
 liblog_la_SOURCES = \
-	access_log.h \
-	access_log.cc \
 	Config.cc \
 	Config.h \
+	CustomLog.h \
 	File.cc \
 	File.h \
 	FormatHttpdCombined.cc \
 	FormatHttpdCommon.cc \
-	Formats.h \
 	FormatSquidCustom.cc \
 	FormatSquidIcap.cc \
 	FormatSquidNative.cc \
 	FormatSquidReferer.cc \
 	FormatSquidUseragent.cc \
+	Formats.h \
+	FormattedLog.cc \
+	FormattedLog.h \
 	ModDaemon.cc \
 	ModDaemon.h \
 	ModStdio.cc \
@@ -37,8 +37,9 @@ liblog_la_SOURCES = \
 	ModSyslog.h \
 	ModUdp.cc \
 	ModUdp.h \
-	CustomLog.h \
-	CustomLog.cc \
 	TcpLogger.cc \
-	TcpLogger.h
+	TcpLogger.h \
+	access_log.cc \
+	access_log.h \
+	forward.h
 

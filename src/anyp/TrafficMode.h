@@ -1,19 +1,19 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_ANYP_TRAFFIC_MODE_H
-#define SQUID_ANYP_TRAFFIC_MODE_H
+#ifndef SQUID_SRC_ANYP_TRAFFICMODE_H
+#define SQUID_SRC_ANYP_TRAFFICMODE_H
 
 namespace AnyP
 {
 
 /**
- * Set of 'mode' flags defining types of trafic which can be received.
+ * Set of 'mode' flags defining types of traffic which can be received.
  *
  * Use to determine the processing steps which need to be applied
  * to this traffic under any special circumstances which may apply.
@@ -81,5 +81,5 @@ public:
 
 } // namespace AnyP
 
-#endif
+#endif /* SQUID_SRC_ANYP_TRAFFICMODE_H */
 

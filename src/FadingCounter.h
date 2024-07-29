@@ -1,17 +1,17 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_FADING_COUNTER_H
-#define SQUID_FADING_COUNTER_H
+#ifndef SQUID_SRC_FADINGCOUNTER_H
+#define SQUID_SRC_FADINGCOUNTER_H
 
 #include <vector>
 
-/// Counts events, forgetting old ones. Usefull for "3 errors/minute" limits.
+/// Counts events, forgetting old ones. Useful for "3 errors/minute" limits.
 class FadingCounter
 {
 public:
@@ -29,7 +29,7 @@ public:
     double horizon;
 
 private:
-    const int precision; ///< #counting slots, controls measur. occuracy
+    const int precision; ///< #counting slots, controls measur. accuracy
     double delta; ///< sub-interval duration = horizon/precision
 
     double lastTime; ///< time of the last update
@@ -37,5 +37,5 @@ private:
     int total; ///< number of remembered events (possibly stale)
 };
 
-#endif /* SQUID_FADING_COUNTER_H */
+#endif /* SQUID_SRC_FADINGCOUNTER_H */
 

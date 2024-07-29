@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -10,12 +10,11 @@
 
 #include "squid.h"
 #include "acl/Gadgets.h"
+#include "auth/Config.h"
 #include "auth/CredentialsCache.h"
 #include "base/RunnersRegistry.h"
-#include "Debug.h"
+#include "debug/Stream.h"
 #include "event.h"
-#include "SquidConfig.h"
-#include "SquidTime.h"
 
 namespace Auth {
 
@@ -27,19 +26,19 @@ public:
         whichCache(c)
     {}
 
-    virtual ~CredentialCacheRr() {
+    ~CredentialCacheRr() override {
         debugs(29, 5, "Terminating Auth credentials cache: " << name);
         // invalidate the CBDATA reference.
         // causes Auth::*::User::Cache() to produce nil / invalid pointer
         delete whichCache.get();
     }
 
-    virtual void endingShutdown() override {
+    void endingShutdown() override {
         debugs(29, 5, "Clearing Auth credentials cache: " << name);
         whichCache->reset();
     }
 
-    virtual void syncConfig() override {
+    void syncConfig() override {
         debugs(29, 5, "Reconfiguring Auth credentials cache: " << name);
         whichCache->doConfigChangeCleanup();
     }
@@ -85,7 +84,7 @@ void
 CredentialsCache::cleanup()
 {
     // cache entries with expiretime <= expirationTime are to be evicted
-    const time_t expirationTime =  current_time.tv_sec - ::Config.authenticateTTL;
+    const time_t expirationTime =  current_time.tv_sec - Auth::TheConfig.credentialsTtl;
 
     const auto end = store_.end();
     for (auto i = store_.begin(); i != end;) {
@@ -103,7 +102,7 @@ CredentialsCache::cleanup()
 }
 
 void
-CredentialsCache::insert(const SBuf &userKey, Auth::User::Pointer anAuth_user)
+CredentialsCache::insert(const SBuf &userKey, const Auth::User::Pointer &anAuth_user)
 {
     debugs(29, 6, "adding " << userKey << " (" << anAuth_user->username() << ")");
     store_[userKey] = anAuth_user;
@@ -133,7 +132,7 @@ CredentialsCache::scheduleCleanup()
     if (!gcScheduled_ && store_.size()) {
         gcScheduled_ = true;
         eventAdd(cacheCleanupEventName, &CredentialsCache::Cleanup,
-                 this, ::Config.authenticateGCInterval, 1);
+                 this, Auth::TheConfig.garbageCollectInterval, 1);
     }
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -9,12 +9,18 @@
 #ifndef SQUID_SRC_HTTP_STREAM_H
 #define SQUID_SRC_HTTP_STREAM_H
 
+#include "clientStreamForward.h"
+#include "comm/forward.h"
+#include "debug/Stream.h"
+#include "error/Error.h"
 #include "http/forward.h"
+#include "log/forward.h"
 #include "mem/forward.h"
+#include "servers/forward.h"
 #include "StoreIOBuffer.h"
-
-class clientStreamNode;
-class ClientHttpRequest;
+#if USE_DELAY_POOLS
+#include "MessageBucket.h"
+#endif
 
 namespace Http
 {
@@ -70,7 +76,7 @@ class Stream : public RefCountable
 public:
     /// construct with HTTP/1.x details
     Stream(const Comm::ConnectionPointer &aConn, ClientHttpRequest *aReq);
-    ~Stream();
+    ~Stream() override;
 
     /// register this stream with the Server
     void registerWithConn();
@@ -113,7 +119,7 @@ public:
     ConnStateData *getConn() const;
 
     /// update state to reflect I/O error
-    void noteIoError(const int xerrno);
+    void noteIoError(const Error &, const LogTagsErrors &);
 
     /// cleanup when the transaction has finished. may destroy 'this'
     void finished();
@@ -161,6 +167,9 @@ private:
 
     bool mayUseConnection_; /* This request may use the connection. Don't read anymore requests for now */
     bool connRegistered_;
+#if USE_DELAY_POOLS
+    MessageBucket::Pointer writeQuotaHandler; ///< response write limiter, if configured
+#endif
 };
 
 } // namespace Http

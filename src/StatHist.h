@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef STATHIST_H_
-#define STATHIST_H_
+#ifndef SQUID_SRC_STATHIST_H
+#define SQUID_SRC_STATHIST_H
 
 /* for StoreEntry */
 #include "Store.h"
@@ -29,9 +29,9 @@ public:
      * \note the default constructor doesn't fully initialize.
      *       you have to call one of the *init functions to specialize the
      *       histogram
-     * \todo merge functionality from the *init functions to the constructor and
+     * TODO: merge functionality from the *init functions to the constructor and
      *       drop these
-     * \todo specialize the class in a small hierarchy so that all
+     * TODO: specialize the class in a small hierarchy so that all
      *       relevant initializations are done at build-time
      */
     StatHist() = default;
@@ -88,7 +88,7 @@ protected:
      *
      *  In practice, the requirements are less strict,
      *  but then it gets hard to define them without math notation.
-     *  val_in is applied after offseting the value but before scaling
+     *  val_in is applied after offsetting the value but before scaling
      *  See log and linear based histograms for examples
      */
     void init(unsigned int capacity, hbase_f * val_in, hbase_f * val_out, double min, double max);
@@ -138,5 +138,5 @@ StatHist::operator =(const StatHist & src)
     return *this;
 }
 
-#endif /* STATHIST_H_ */
+#endif /* SQUID_SRC_STATHIST_H */
 

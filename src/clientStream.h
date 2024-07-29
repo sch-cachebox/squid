@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_CLIENTSTREAM_H
-#define SQUID_CLIENTSTREAM_H
+#ifndef SQUID_SRC_CLIENTSTREAM_H
+#define SQUID_SRC_CLIENTSTREAM_H
 
 #include "base/RefCount.h"
 #include "clientStreamForward.h"
@@ -17,7 +17,7 @@
 /**
  \defgroup ClientStreamAPI Client Streams API
  \ingroup Components
- \section Introduction Introduction
+ \section ClientStreamIntroduction Introduction
  \par
  *    A ClientStream implements a unidirectional, non-blocking,
  *    pull pipeline. They allow code to be inserted into the
@@ -49,7 +49,6 @@
  \li             satisfies the read request, or
  \li             inserts a new node above it and calls clientStreamRead(), or
  \li             calls clientStreamRead()
- \todo DOCS: make the above list nested.
  *
  \par
  *    There is no requirement for the Read parameters from different
@@ -58,7 +57,7 @@
  *
  \section WhatsInANode Whats in a node
  *
- \todo ClientStreams: These details should really be codified as a class which all ClientStream nodes inherit from.
+ * TODO: ClientStreams: These details should really be codified as a class which all ClientStream nodes inherit from.
  *
  \par   Each node must have:
  \li    read method - to allow loose coupling in the pipeline. (The reader may
@@ -96,7 +95,7 @@ public:
 };
 
 /// \ingroup ClientStreamAPI
-void clientStreamInit(dlink_list *, CSR *, CSD *, CSS *, ClientStreamData, CSCB *, CSD *, ClientStreamData, StoreIOBuffer tailBuffer);
+void clientStreamInit(dlink_list *, CSR *, CSD *, CSS *, const ClientStreamData &, CSCB *, CSD *, const ClientStreamData &, StoreIOBuffer tailBuffer);
 
 /// \ingroup ClientStreamAPI
 void clientStreamInsertHead(dlink_list *, CSR *, CSCB *, CSD *, CSS *, ClientStreamData);
@@ -144,7 +143,7 @@ void clientStreamDetach(clientStreamNode *thisObject, ClientHttpRequest *http);
 /**
  \ingroup ClientStreamAPI
  *
- * Detachs the tail of the stream. CURRENTLY DOES NOT clean up the tail node data -
+ * Detaches the tail of the stream. CURRENTLY DOES NOT clean up the tail node data -
  * this must be done separately. Thus Abort may ONLY be called by the tail node.
  *
  \param thisObject  'this' reference for the client stream
@@ -166,5 +165,5 @@ void clientStreamAbort(clientStreamNode *thisObject, ClientHttpRequest *http);
  */
 clientStream_status_t clientStreamStatus(clientStreamNode *thisObject, ClientHttpRequest *http);
 
-#endif /* SQUID_CLIENTSTREAM_H */
+#endif /* SQUID_SRC_CLIENTSTREAM_H */
 

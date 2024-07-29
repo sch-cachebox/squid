@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_ICAPMODXACT_H
-#define SQUID_ICAPMODXACT_H
+#ifndef SQUID_SRC_ADAPTATION_ICAP_MODXACT_H
+#define SQUID_SRC_ADAPTATION_ICAP_MODXACT_H
 
 #include "AccessLogEntry.h"
 #include "adaptation/icap/InOut.h"
@@ -15,6 +15,7 @@
 #include "adaptation/icap/Xaction.h"
 #include "BodyPipe.h"
 #include "http/one/forward.h"
+#include "http/one/TeChunkedParser.h"
 
 /*
  * ICAPModXact implements ICAP REQMOD and RESPMOD transaction using
@@ -105,27 +106,60 @@ private:
     enum State { stDisabled, stWriting, stIeof, stDone } theState;
 };
 
+/// Parses and stores ICAP trailer header block.
+class TrailerParser
+{
+public:
+    TrailerParser() : trailer(hoReply), hdr_sz(0) {}
+    /// Parses trailers stored in a buffer.
+    /// \returns true and sets hdr_sz on success
+    /// \returns false and sets *error to zero when needs more data
+    /// \returns false and sets *error to a positive Http::StatusCode on error
+    bool parse(const char *buf, int len, int atEnd, Http::StatusCode *error);
+    HttpHeader trailer;
+    /// parsed trailer size if parse() was successful
+    size_t hdr_sz; // pedantic XXX: wrong type dictated by HttpHeader::parse() API
+};
+
+/// handles ICAP-specific chunk extensions supported by Squid
+class ChunkExtensionValueParser: public Http1::ChunkExtensionValueParser
+{
+public:
+    /* Http1::ChunkExtensionValueParser API */
+    void parse(Tokenizer &tok, const SBuf &extName) override;
+
+    bool sawUseOriginalBody() const { return useOriginalBody_ >= 0; }
+    uint64_t useOriginalBody() const { assert(sawUseOriginalBody()); return static_cast<uint64_t>(useOriginalBody_); }
+
+private:
+    static const SBuf UseOriginalBodyName;
+
+    /// the value of the parsed use-original-body chunk extension (or -1)
+    int64_t useOriginalBody_ = -1;
+};
+
 class ModXact: public Xaction, public BodyProducer, public BodyConsumer
 {
-    CBDATA_CLASS(ModXact);
+    CBDATA_CHILD(ModXact);
 
 public:
-    ModXact(HttpMsg *virginHeader, HttpRequest *virginCause, AccessLogEntry::Pointer &alp, ServiceRep::Pointer &s);
-    virtual ~ModXact();
+    ModXact(Http::Message *virginHeader, HttpRequest *virginCause, AccessLogEntry::Pointer &alp, ServiceRep::Pointer &s);
+    ~ModXact() override;
 
     // BodyProducer methods
-    virtual void noteMoreBodySpaceAvailable(BodyPipe::Pointer);
-    virtual void noteBodyConsumerAborted(BodyPipe::Pointer);
+    void noteMoreBodySpaceAvailable(BodyPipe::Pointer) override;
+    void noteBodyConsumerAborted(BodyPipe::Pointer) override;
 
     // BodyConsumer methods
-    virtual void noteMoreBodyDataAvailable(BodyPipe::Pointer);
-    virtual void noteBodyProductionEnded(BodyPipe::Pointer);
-    virtual void noteBodyProducerAborted(BodyPipe::Pointer);
+    void noteMoreBodyDataAvailable(BodyPipe::Pointer) override;
+    void noteBodyProductionEnded(BodyPipe::Pointer) override;
+    void noteBodyProducerAborted(BodyPipe::Pointer) override;
 
-    // comm handlers
-    virtual void handleCommConnected();
-    virtual void handleCommWrote(size_t size);
-    virtual void handleCommRead(size_t size);
+    /* Xaction API */
+    void startShoveling() override;
+    void handleCommWrote(size_t size) override;
+    void handleCommRead(size_t size) override;
+
     void handleCommWroteHeaders();
     void handleCommWroteBody();
 
@@ -138,17 +172,17 @@ public:
     InOut adapted;
 
     // bypasses exceptions if needed and possible
-    virtual void callException(const std::exception &e);
+    void callException(const std::exception &e) override;
 
     /// record error detail in the virgin request if possible
-    virtual void detailError(int errDetail);
+    void detailError(const ErrorDetail::Pointer &errDetail) override;
     // Icap::Xaction API
-    virtual void clearError();
+    void clearError() override;
     /// The master transaction log entry
-    virtual AccessLogEntry::Pointer masterLogEntry() { return alMaster; }
+    AccessLogEntry::Pointer masterLogEntry() override { return alMaster; }
 
 private:
-    virtual void start();
+    void start() override;
 
     /// locates the request, either as a cause or as a virgin message itself
     const HttpRequest &virginRequest() const; // Must always be available
@@ -170,8 +204,8 @@ private:
 
     void startReading();
     void readMore();
-    virtual bool doneReading() const { return commEof || state.doneParsing(); }
-    virtual bool doneWriting() const { return state.doneWriting(); }
+    bool doneReading() const override { return commEof || state.doneParsing(); }
+    bool doneWriting() const override { return state.doneWriting(); }
 
     size_t virginContentSize(const VirginBodyAct &act) const;
     const char *virginContentData(const VirginBodyAct &act) const;
@@ -202,10 +236,11 @@ private:
     void parseHeaders();
     void parseIcapHead();
     void parseHttpHead();
-    bool parseHead(HttpMsg *head);
+    bool parseHead(Http::Message *head);
 
     void decideOnParsingBody();
     void parseBody();
+    void parseIcapTrailer();
     void maybeAllocateHttpMsg();
 
     void handle100Continue();
@@ -223,28 +258,41 @@ private:
     void prepEchoing();
     void prepPartialBodyEchoing(uint64_t pos);
     void echoMore();
-    void updateSources(); ///< Update the HttpMsg sources
+    void updateSources(); ///< Update the Http::Message sources
 
-    virtual bool doneAll() const;
-    virtual void swanSong();
+    bool doneAll() const override;
+    void swanSong() override;
 
     void stopReceiving();
     void stopSending(bool nicely);
     void stopWriting(bool nicely);
-    void stopParsing();
+    void stopParsing(const bool checkUnparsedData = true);
     void stopBackup();
 
-    virtual void fillPendingStatus(MemBuf &buf) const;
-    virtual void fillDoneStatus(MemBuf &buf) const;
-    virtual bool fillVirginHttpHeader(MemBuf&) const;
+    void fillPendingStatus(MemBuf &buf) const override;
+    void fillDoneStatus(MemBuf &buf) const override;
+    bool fillVirginHttpHeader(MemBuf&) const override;
 
 private:
-    void packHead(MemBuf &httpBuf, const HttpMsg *head);
-    void encapsulateHead(MemBuf &icapBuf, const char *section, MemBuf &httpBuf, const HttpMsg *head);
+    /// parses a message header or trailer
+    /// \returns true on success
+    /// \returns false if more data is needed
+    /// \throw TextException on unrecoverable error
+    template<class Part>
+    bool parsePart(Part *part, const char *description);
+
+    void packHead(MemBuf &httpBuf, const Http::Message *head);
+    void encapsulateHead(MemBuf &icapBuf, const char *section, MemBuf &httpBuf, const Http::Message *head);
     bool gotEncapsulated(const char *section) const;
+    /// whether ICAP response header indicates HTTP header presence
+    bool expectHttpHeader() const;
+    /// whether ICAP response header indicates HTTP body presence
+    bool expectHttpBody() const;
+    /// whether ICAP response header indicates ICAP trailers presence
+    bool expectIcapTrailers() const;
     void checkConsuming();
 
-    virtual void finalizeLogInfo();
+    void finalizeLogInfo() override;
 
     SizedEstimate virginBody;
     VirginBodyAct virginBodyWriting; // virgin body writing state
@@ -269,6 +317,10 @@ private:
     int64_t replyHttpBodySize;
 
     int adaptHistoryId; ///< adaptation history slot reservation
+
+    TrailerParser *trailerParser;
+
+    ChunkExtensionValueParser extensionParser;
 
     class State
     {
@@ -304,7 +356,7 @@ private:
                    parsing == psHttpHeader;
         }
 
-        enum Parsing { psIcapHeader, psHttpHeader, psBody, psDone } parsing;
+        enum Parsing { psIcapHeader, psHttpHeader, psBody, psIcapTrailer, psDone } parsing;
 
         // measures ICAP request writing progress
         enum Writing { writingInit, writingConnect, writingHeaders,
@@ -325,15 +377,15 @@ private:
 // creates ModXact when needed
 class ModXactLauncher: public Launcher
 {
-    CBDATA_CLASS(ModXactLauncher);
+    CBDATA_CHILD(ModXactLauncher);
 
 public:
-    ModXactLauncher(HttpMsg *virginHeader, HttpRequest *virginCause, AccessLogEntry::Pointer &alp, Adaptation::ServicePointer s);
+    ModXactLauncher(Http::Message *virginHeader, HttpRequest *virginCause, AccessLogEntry::Pointer &alp, Adaptation::ServicePointer s);
 
 protected:
-    virtual Xaction *createXaction();
+    Xaction *createXaction() override;
 
-    virtual void swanSong();
+    void swanSong() override;
 
     /// starts or stops transaction accounting in ICAP history
     void updateHistory(bool start);
@@ -346,5 +398,5 @@ protected:
 } // namespace Icap
 } // namespace Adaptation
 
-#endif /* SQUID_ICAPMOD_XACT_H */
+#endif /* SQUID_SRC_ADAPTATION_ICAP_MODXACT_H */
 

@@ -1,17 +1,15 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_ICAPINOUT_H
-#define SQUID_ICAPINOUT_H
+#ifndef SQUID_SRC_ADAPTATION_ICAP_INOUT_H
+#define SQUID_SRC_ADAPTATION_ICAP_INOUT_H
 
-#include "HttpMsg.h"
 #include "HttpReply.h"
-#include "HttpRequest.h"
 
 // IcapInOut manages a pointer to the HTTP message being worked on.
 // For HTTP responses, request header information is also available
@@ -27,9 +25,10 @@ class InOut
 {
 
 public:
-    typedef HttpMsg Header;
+    // TODO: s/Header/Message/i ?
+    typedef Http::Message Header;
 
-    InOut(): header(0), cause(0) {}
+    InOut(): header(nullptr), cause(nullptr) {}
 
     ~InOut() {
         HTTPMSGUNLOCK(cause);
@@ -64,10 +63,8 @@ public:
     BodyPipe::Pointer body_pipe;
 };
 
-// TODO: s/Header/Message/i ?
-
 } // namespace Icap
 } // namespace Adaptation
 
-#endif /* SQUID_ICAPINOUT_H */
+#endif /* SQUID_SRC_ADAPTATION_ICAP_INOUT_H */
 

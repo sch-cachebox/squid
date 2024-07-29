@@ -1,20 +1,20 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_MEMOBJECT_H
-#define SQUID_MEMOBJECT_H
+#ifndef SQUID_SRC_MEMOBJECT_H
+#define SQUID_SRC_MEMOBJECT_H
 
-#include "CommRead.h"
+#include "base/DelayedAsyncCalls.h"
 #include "dlink.h"
 #include "http/RequestMethod.h"
+#include "HttpReply.h"
 #include "RemovalPolicy.h"
 #include "sbuf/SBuf.h"
-#include "SquidString.h"
 #include "stmem.h"
 #include "store/forward.h"
 #include "StoreIOBuffer.h"
@@ -26,11 +26,9 @@
 #endif
 
 typedef void STMCB (void *data, StoreIOBuffer wroteBuffer);
-typedef void STABH(void *);
 
 class store_client;
-class HttpRequest;
-class HttpReply;
+class PeerSelector;
 
 class MemObject
 {
@@ -55,12 +53,57 @@ public:
     bool hasUris() const;
 
     void write(const StoreIOBuffer &buf);
-    void unlinkRequest();
-    HttpReply const *getReply() const;
-    void replaceHttpReply(HttpReply *newrep);
+    void unlinkRequest() { request = nullptr; }
+
+    /// HTTP response before 304 (Not Modified) updates
+    /// starts "empty"; modified via replaceBaseReply() or adjustableBaseReply()
+    const HttpReply &baseReply() const { return *reply_; }
+
+    /// \returns nil -- if no 304 updates since replaceBaseReply()
+    /// \returns combination of baseReply() and 304 updates -- after updates
+    const HttpReplyPointer &updatedReply() const { return updatedReply_; }
+
+    /// \returns the updated-by-304(s) response (if it exists)
+    /// \returns baseReply() (otherwise)
+    const HttpReply &freshestReply() const {
+        if (updatedReply_)
+            return *updatedReply_;
+        else
+            return baseReply();
+    }
+
+    /// \returns writable base reply for parsing and other initial modifications
+    /// Base modifications can only be done when forming/loading the entry.
+    /// After that, use replaceBaseReply() to reset all of the replies.
+    HttpReply &adjustableBaseReply();
+
+    /// (re)sets base reply, usually just replacing the initial/empty object
+    /// also forgets the updated reply (if any)
+    void replaceBaseReply(const HttpReplyPointer &r);
+
+    /// (re)sets updated reply; \see updatedReply()
+    void updateReply(const HttpReply &r) { updatedReply_ = &r; }
+
+    /// reflects past Controller::updateOnNotModified(old, e304) calls:
+    /// for HTTP 304 entries: whether our entry was used as "e304"
+    /// for other entries: whether our entry was updated as "old"
+    bool appliedUpdates = false;
+
     void stat (MemBuf * mb) const;
+
+    /// The offset of the last memory-stored HTTP response byte plus one.
+    /// * HTTP response headers (if any) are stored at offset zero.
+    /// * HTTP response body byte[n] usually has offset (hdr_sz + n), where
+    ///   hdr_sz is the size of stored HTTP response headers (zero if none); and
+    ///   n is the corresponding byte offset in the whole resource body.
+    ///   However, some 206 (Partial Content) response bodies are stored (and
+    ///   retrieved) as regular 200 response bodies, disregarding offsets of
+    ///   their body parts. \sa HttpStateData::decideIfWeDoRanges().
     int64_t endOffset () const;
-    void markEndOfReplyHeaders(); ///< sets _reply->hdr_sz to endOffset()
+
+    /// sets baseReply().hdr_sz (i.e. written reply headers size) to endOffset()
+    void markEndOfReplyHeaders();
+
     /// negative if unknown; otherwise, expected object_sz, expected endOffset
     /// maximum, and stored reply headers+body size (all three are the same)
     int64_t expectedReplySize() const;
@@ -136,6 +179,20 @@ public:
     class XitTable
     {
     public:
+        /// associate our StoreEntry with a Transients entry at the given index
+        void open(const int32_t anIndex, const Io anIo)
+        {
+            index = anIndex;
+            io = anIo;
+        }
+
+        /// stop associating our StoreEntry with a Transients entry
+        void close()
+        {
+            index = -1;
+            io = Store::ioDone;
+        }
+
         int32_t index = -1; ///< entry position inside the in-transit table
         Io io = ioUndecided; ///< current I/O state
     };
@@ -152,19 +209,14 @@ public:
     };
     MemCache memCache; ///< current [shared] memory caching state for the entry
 
-    /* Read only - this reply must be preserved by store clients */
-    /* The original reply. possibly with updated metadata. */
-    HttpRequest *request = nullptr;
+    HttpRequestPointer request;
 
     struct timeval start_ping;
     IRCB *ping_reply_callback;
-    void *ircb_data = nullptr;
+    PeerSelector *ircb_data = nullptr;
 
-    struct abort_ {
-        abort_() { callback = nullptr; }
-        STABH *callback;
-        void *data = nullptr;
-    } abort;
+    /// used for notifying StoreEntry writers about 3rd-party initiated aborts
+    AsyncCallPointer abortCallback;
     RemovalPolicyNode repl;
     int id = 0;
     int64_t object_sz = -1;
@@ -175,20 +227,21 @@ public:
 
     SBuf vary_headers;
 
-    void delayRead(DeferredRead const &);
+    void delayRead(const AsyncCallPointer &);
     void kickReads();
 
 private:
-    HttpReply *_reply = nullptr;
+    HttpReplyPointer reply_; ///< \see baseReply()
+    HttpReplyPointer updatedReply_; ///< \see updatedReply()
 
-    mutable String storeId_; ///< StoreId for our entry (usually request URI)
-    mutable String logUri_;  ///< URI used for logging (usually request URI)
+    mutable SBuf storeId_; ///< StoreId for our entry (usually request URI)
+    mutable SBuf logUri_;  ///< URI used for logging (usually request URI)
 
-    DeferredReadManager deferredReads;
+    DelayedAsyncCalls deferredReads;
 };
 
 /** global current memory removal policy */
 extern RemovalPolicy *mem_policy;
 
-#endif /* SQUID_MEMOBJECT_H */
+#endif /* SQUID_SRC_MEMOBJECT_H */
 

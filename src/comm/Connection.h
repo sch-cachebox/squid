@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -8,9 +8,11 @@
 
 /* DEBUG: section 05    Socket Functions */
 
-#ifndef _SQUIDCONNECTIONDETAIL_H_
-#define _SQUIDCONNECTIONDETAIL_H_
+#ifndef SQUID_SRC_COMM_CONNECTION_H
+#define SQUID_SRC_COMM_CONNECTION_H
 
+#include "base/CodeContext.h"
+#include "base/InstanceId.h"
 #include "comm/forward.h"
 #include "defines.h"
 #if USE_SQUID_EUI
@@ -21,7 +23,7 @@
 #include "ip/Address.h"
 #include "ip/forward.h"
 #include "mem/forward.h"
-#include "SquidTime.h"
+#include "time/gadgets.h"
 
 #include <iosfwd>
 #include <ostream>
@@ -47,11 +49,16 @@ namespace Comm
 #define COMM_DOBIND             0x08  // requires a bind()
 #define COMM_TRANSPARENT        0x10  // arrived via TPROXY
 #define COMM_INTERCEPTION       0x20  // arrived via NAT
+#define COMM_REUSEPORT          0x40 //< needs SO_REUSEPORT
+/// not registered with Comm and not owned by any connection-closing code
+#define COMM_ORPHANED           0x80
+/// Internal Comm optimization: Keep the source port unassigned until connect(2)
+#define COMM_DOBIND_PORT_LATER 0x100
 
 /**
  * Store data about the physical and logical attributes of a connection.
  *
- * Some link state can be infered from the data, however this is not an
+ * Some link state can be inferred from the data, however this is not an
  * object for state data. But a semantic equivalent for FD with easily
  * accessible cached properties not requiring repeated complex lookups.
  *
@@ -62,7 +69,7 @@ namespace Comm
  * These objects should not be passed around directly,
  * but a Comm::ConnectionPointer should be passed instead.
  */
-class Connection : public RefCountable
+class Connection: public CodeContext
 {
     MEMPROXY_CLASS(Comm::Connection);
 
@@ -70,12 +77,19 @@ public:
     Connection();
 
     /** Clear the connection properties and close any open socket. */
-    ~Connection();
+    ~Connection() override;
 
-    /** Copy an existing connections IP and properties.
-     * This excludes the FD. The new copy will be a closed connection.
-     */
-    ConnectionPointer copyDetails() const;
+    /// To prevent accidental copying of Connection objects that we started to
+    /// open or that are open, use cloneProfile() instead.
+    Connection(const Connection &&) = delete;
+
+    /// Create a new closed Connection with the same configuration as this one.
+    ConnectionPointer cloneProfile() const;
+
+    /// close the still-open connection when its last reference is gone
+    void enterOrphanage() { flags |= COMM_ORPHANED; }
+    /// resume relying on owner(s) to initiate an explicit connection closure
+    void leaveOrphanage() { flags &= ~COMM_ORPHANED; }
 
     /** Close any open socket. */
     void close();
@@ -123,12 +137,9 @@ public:
     Security::NegotiationHistory *tlsNegotiations();
     const Security::NegotiationHistory *hasTlsNegotiations() const {return tlsHistory;}
 
-private:
-    /** These objects may not be exactly duplicated. Use copyDetails() instead. */
-    Connection(const Connection &c);
-
-    /** These objects may not be exactly duplicated. Use copyDetails() instead. */
-    Connection & operator =(const Connection &c);
+    /* CodeContext API */
+    ScopedId codeContextGist() const override;
+    std::ostream &detailCodeContext(std::ostream &os) const override;
 
 public:
     /** Address/Port for the Squid end of a TCP link. */
@@ -146,18 +157,28 @@ public:
     /** Quality of Service TOS values currently sent on this connection */
     tos_t tos;
 
-    /** Netfilter MARK values currently sent on this connection */
+    /** Netfilter MARK values currently sent on this connection
+     * In case of FTP, the MARK will be sent on data connections as well.
+     */
     nfmark_t nfmark;
+
+    /** Netfilter CONNMARK value previously retrieved from this connection
+     * In case of FTP, the CONNMARK will NOT be applied to data connections, for one main reason:
+     * the CONNMARK could be set by a third party like iptables and overwriting it in squid may
+     * cause side effects and break CONNMARK-based policy. In other words, data connection is
+     * related to control connection, but it's not the same.
+     */
+    nfmark_t nfConnmark = 0;
 
     /** COMM flags set on this connection */
     int flags;
-
-    char rfc931[USER_IDENT_SZ];
 
 #if USE_SQUID_EUI
     Eui::Eui48 remoteEui48;
     Eui::Eui64 remoteEui64;
 #endif
+
+    InstanceId<Connection, uint64_t> id;
 
 private:
     /** cache_peer data object (if any) */
@@ -170,34 +191,17 @@ private:
     Security::NegotiationHistory *tlsHistory;
 };
 
-}; // namespace Comm
-
-// NP: Order and namespace here is very important.
-//     * The second define inlines the first.
-//     * Stream inheritance overloading is searched in the global scope first.
+std::ostream &operator <<(std::ostream &, const Connection &);
 
 inline std::ostream &
-operator << (std::ostream &os, const Comm::Connection &conn)
+operator <<(std::ostream &os, const ConnectionPointer &conn)
 {
-    os << "local=" << conn.local << " remote=" << conn.remote;
-    if (conn.fd >= 0)
-        os << " FD " << conn.fd;
-    if (conn.flags != COMM_UNSET)
-        os << " flags=" << conn.flags;
-#if USE_IDENT
-    if (*conn.rfc931)
-        os << " IDENT::" << conn.rfc931;
-#endif
-    return os;
-}
-
-inline std::ostream &
-operator << (std::ostream &os, const Comm::ConnectionPointer &conn)
-{
-    if (conn != NULL)
+    if (conn != nullptr)
         os << *conn;
     return os;
 }
 
-#endif
+} // namespace Comm
+
+#endif /* SQUID_SRC_COMM_CONNECTION_H */
 

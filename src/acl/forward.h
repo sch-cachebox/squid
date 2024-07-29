@@ -1,17 +1,16 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_ACL_FORWARD_H
-#define SQUID_ACL_FORWARD_H
+#ifndef SQUID_SRC_ACL_FORWARD_H
+#define SQUID_SRC_ACL_FORWARD_H
 
 #include "base/RefCount.h"
 
-class ACL;
 class ACLChecklist;
 class ACLFilledChecklist;
 class ACLList;
@@ -22,10 +21,13 @@ class AclSizeLimit;
 namespace Acl
 {
 
+class Node;
 class Address;
+class AndNode;
+class Answer;
+class ChecklistFiller;
 class InnerNode;
 class NotNode;
-class AndNode;
 class OrNode;
 class Tree;
 
@@ -34,10 +36,7 @@ void Init(void);
 
 } // namespace Acl
 
-class allow_t;
-typedef void ACLCB(allow_t, void *);
-
-#define ACL_NAME_SZ 64
+typedef void ACLCB(Acl::Answer, void *);
 
 // TODO: Consider renaming all users and removing. Cons: hides the difference
 // between ACLList tree without actions and acl_access Tree with actions.
@@ -47,5 +46,5 @@ typedef void ACLCB(allow_t, void *);
 class ExternalACLEntry;
 typedef RefCount<ExternalACLEntry> ExternalACLEntryPointer;
 
-#endif /* SQUID_ACL_FORWARD_H */
+#endif /* SQUID_SRC_ACL_FORWARD_H */
 

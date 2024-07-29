@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -12,30 +12,27 @@
 #include "auth/basic/UserRequest.h"
 #include "auth/QueueNode.h"
 #include "auth/State.h"
-#include "charset.h"
-#include "Debug.h"
+#include "debug/Stream.h"
 #include "format/Format.h"
 #include "helper.h"
 #include "helper/Reply.h"
-#include "HttpMsg.h"
 #include "HttpRequest.h"
 #include "MemBuf.h"
 #include "rfc1738.h"
-#include "SquidTime.h"
 
 #if !defined(HELPER_INPUT_BUFFER)
 #define HELPER_INPUT_BUFFER  8192
 #endif
 
-int
+bool
 Auth::Basic::UserRequest::authenticated() const
 {
     Auth::Basic::User const *basic_auth = dynamic_cast<Auth::Basic::User const *>(user().getRaw());
 
     if (basic_auth && basic_auth->authenticated())
-        return 1;
+        return true;
 
-    return 0;
+    return false;
 }
 
 const char *
@@ -44,7 +41,7 @@ Auth::Basic::UserRequest::credentialsStr()
     Auth::Basic::User const *basic_auth = dynamic_cast<Auth::Basic::User const *>(user().getRaw());
     if (basic_auth)
         return basic_auth->passwd;
-    return NULL;
+    return nullptr;
 }
 
 /* log a basic user in
@@ -52,20 +49,20 @@ Auth::Basic::UserRequest::credentialsStr()
 void
 Auth::Basic::UserRequest::authenticate(HttpRequest *, ConnStateData *, Http::HdrType)
 {
-    assert(user() != NULL);
+    assert(user() != nullptr);
 
     /* if the password is not ok, do an identity */
     if (!user() || user()->credentials() != Auth::Ok)
         return;
 
     /* are we about to recheck the credentials externally? */
-    if ((user()->expiretime + static_cast<Auth::Basic::Config*>(Auth::Config::Find("basic"))->credentialsTTL) <= squid_curtime) {
-        debugs(29, 4, HERE << "credentials expired - rechecking");
+    if ((user()->expiretime + static_cast<Auth::Basic::Config*>(Auth::SchemeConfig::Find("basic"))->credentialsTTL) <= squid_curtime) {
+        debugs(29, 4, "credentials expired - rechecking");
         return;
     }
 
     /* we have been through the external helper, and the credentials haven't expired */
-    debugs(29, 9, HERE << "user '" << user()->username() << "' authenticated");
+    debugs(29, 9, "user '" << user()->username() << "' authenticated");
 
     /* Decode now takes care of finding the AuthUser struct in the cache */
     /* after external auth occurs anyway */
@@ -86,7 +83,7 @@ Auth::Basic::UserRequest::module_direction()
         return Auth::CRED_LOOKUP;
 
     case Auth::Ok:
-        if (user()->expiretime + static_cast<Auth::Basic::Config*>(Auth::Config::Find("basic"))->credentialsTTL <= squid_curtime)
+        if (user()->expiretime + static_cast<Auth::Basic::Config*>(Auth::SchemeConfig::Find("basic"))->credentialsTTL <= squid_curtime)
             return Auth::CRED_LOOKUP;
         return Auth::CRED_VALID;
 
@@ -104,10 +101,10 @@ Auth::Basic::UserRequest::startHelperLookup(HttpRequest *request, AccessLogEntry
 {
     assert(user()->auth_type == Auth::AUTH_BASIC);
     Auth::Basic::User *basic_auth = dynamic_cast<Auth::Basic::User *>(user().getRaw());
-    assert(basic_auth != NULL);
-    debugs(29, 9, HERE << "'" << basic_auth->username() << ":" << basic_auth->passwd << "'");
+    assert(basic_auth != nullptr);
+    debugs(29, 9, "'" << basic_auth->username() << ":" << basic_auth->passwd << "'");
 
-    if (static_cast<Auth::Basic::Config*>(Auth::Config::Find("basic"))->authenticateProgram == NULL) {
+    if (static_cast<Auth::Basic::Config*>(Auth::SchemeConfig::Find("basic"))->authenticateProgram == nullptr) {
         debugs(29, DBG_CRITICAL, "ERROR: No Basic authentication program configured.");
         handler(data);
         return;
@@ -131,15 +128,10 @@ Auth::Basic::UserRequest::startHelperLookup(HttpRequest *request, AccessLogEntry
     char buf[HELPER_INPUT_BUFFER];
     static char usern[HELPER_INPUT_BUFFER];
     static char pass[HELPER_INPUT_BUFFER];
-    if (static_cast<Auth::Basic::Config*>(user()->config)->utf8) {
-        latin1_to_utf8(usern, sizeof(usern), user()->username());
-        latin1_to_utf8(pass, sizeof(pass), basic_auth->passwd);
-        xstrncpy(usern, rfc1738_escape(usern), sizeof(usern));
-        xstrncpy(pass, rfc1738_escape(pass), sizeof(pass));
-    } else {
-        xstrncpy(usern, rfc1738_escape(user()->username()), sizeof(usern));
-        xstrncpy(pass, rfc1738_escape(basic_auth->passwd), sizeof(pass));
-    }
+
+    xstrncpy(usern, rfc1738_escape(user()->username()), sizeof(usern));
+    xstrncpy(pass, rfc1738_escape(basic_auth->passwd), sizeof(pass));
+
     int sz = 0;
     if (const char *keyExtras = helperRequestKeyExtras(request, al))
         sz = snprintf(buf, sizeof(buf), "%s %s %s\n", usern, pass, keyExtras);
@@ -162,20 +154,21 @@ Auth::Basic::UserRequest::HandleReply(void *data, const Helper::Reply &reply)
 {
     Auth::StateData *r = static_cast<Auth::StateData *>(data);
     void *cbdata;
-    debugs(29, 5, HERE << "reply=" << reply);
+    debugs(29, 5, "reply=" << reply);
 
-    assert(r->auth_user_request != NULL);
+    assert(r->auth_user_request != nullptr);
     assert(r->auth_user_request->user()->auth_type == Auth::AUTH_BASIC);
 
     // add new helper kv-pair notes to the credentials object
     // so that any transaction using those credentials can access them
-    r->auth_user_request->user()->notes.appendNewOnly(&reply.notes);
+    static const NotePairs::Names appendables = { SBuf("group"), SBuf("tag") };
+    r->auth_user_request->user()->notes.replaceOrAddOrAppend(&reply.notes, appendables);
 
     /* this is okay since we only play with the Auth::Basic::User child fields below
      * and do not pass the pointer itself anywhere */
     Auth::Basic::User *basic_auth = dynamic_cast<Auth::Basic::User *>(r->auth_user_request->user().getRaw());
 
-    assert(basic_auth != NULL);
+    assert(basic_auth != nullptr);
 
     if (reply.result == Helper::Okay)
         basic_auth->credentials(Auth::Ok);
@@ -198,7 +191,7 @@ Auth::Basic::UserRequest::HandleReply(void *data, const Helper::Reply &reply)
             basic_auth->queue->handler(cbdata);
 
         Auth::QueueNode *tmpnode = basic_auth->queue->next;
-        basic_auth->queue->next = NULL;
+        basic_auth->queue->next = nullptr;
         delete basic_auth->queue;
 
         basic_auth->queue = tmpnode;

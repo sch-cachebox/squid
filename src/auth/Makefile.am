@@ -1,4 +1,4 @@
-## Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+## Copyright (C) 1996-2023 The Squid Software Foundation and contributors
 ##
 ## Squid software is distributed under GPLv2+ license and includes
 ## contributions from numerous individuals and organizations.
@@ -6,7 +6,6 @@
 ##
 
 include $(top_srcdir)/src/Common.am
-include $(top_srcdir)/src/TestHeaders.am
 
 SUBDIRS = $(AUTH_MODULES)
 DIST_SUBDIRS = basic digest negotiate ntlm
@@ -17,25 +16,32 @@ noinst_LTLIBRARIES = libauth.la libacls.la
 
 ## authentication framework; this library is always built
 libauth_la_SOURCES = \
-	Type.h \
-	Type.cc \
 	Config.cc \
 	Config.h \
-	CredentialsCache.h \
-	CredentialsCache.cc \
 	CredentialState.cc \
 	CredentialState.h \
+	CredentialsCache.cc \
+	CredentialsCache.h \
 	Gadgets.cc \
 	Gadgets.h \
 	QueueNode.h \
 	Scheme.cc \
 	Scheme.h \
-	State.h \
+	SchemeConfig.cc \
+	SchemeConfig.h \
+	SchemesConfig.cc \
+	SchemesConfig.h \
 	State.cc \
-	User.h \
+	State.h \
+	Type.cc \
+	Type.h \
 	User.cc \
+	User.h \
+	UserRequest.cc \
 	UserRequest.h \
-	UserRequest.cc
+	forward.h \
+	toUtf.cc \
+	toUtf.h
 
 libauth_la_LIBADD = $(AUTH_LIBS_TO_BUILD)
 libauth_la_DEPENDENCIES = $(AUTH_LIBS_TO_BUILD)
@@ -44,7 +50,6 @@ libauth_la_DEPENDENCIES = $(AUTH_LIBS_TO_BUILD)
 libacls_la_SOURCES = \
 	Acl.cc \
 	Acl.h \
-	\
 	AclMaxUserIp.cc \
 	AclMaxUserIp.h \
 	AclProxyAuth.cc \

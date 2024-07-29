@@ -1,4 +1,4 @@
-## Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+## Copyright (C) 1996-2023 The Squid Software Foundation and contributors
 ##
 ## Squid software is distributed under GPLv2+ license and includes
 ## contributions from numerous individuals and organizations.
@@ -6,7 +6,6 @@
 ##
 
 include $(top_srcdir)/src/Common.am
-include $(top_srcdir)/src/TestHeaders.am
 
 noinst_LTLIBRARIES = libclients.la
 
@@ -17,4 +16,10 @@ libclients_la_SOURCES = \
 	FtpClient.h \
 	FtpGateway.cc \
 	FtpRelay.cc \
+	HttpTunneler.cc \
+	HttpTunneler.h \
+	HttpTunnelerAnswer.cc \
+	HttpTunnelerAnswer.h \
+	WhoisGateway.cc \
+	WhoisGateway.h \
 	forward.h

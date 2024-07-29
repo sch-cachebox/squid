@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -42,12 +42,6 @@
 #include <getopt.h>
 #endif
 
-/* Check if we try to compile on a Windows Platform */
-#if !_SQUID_WINDOWS_
-/* NON Windows Platform !!! */
-#error NON WINDOWS PLATFORM
-#endif
-
 static char NTGroup[256];
 char * NTAllowedGroup;
 char * NTDisAllowedGroup;
@@ -73,7 +67,7 @@ usage(const char *name)
             name);
 }
 
-void
+static void
 process_options(int argc, char *argv[])
 {
     int opt;
@@ -97,14 +91,14 @@ process_options(int argc, char *argv[])
             break;
         case 'h':
             usage(argv[0]);
-            exit(0);
+            exit(EXIT_SUCCESS);
         case '?':
             opt = optopt;
-        /* fall thru to default */
+            [[fallthrough]];
         default:
             fprintf(stderr, "FATAL: Unknown option: -%c\n", opt);
             usage(argv[0]);
-            exit(1);
+            exit(EXIT_FAILURE);
         }
     }
 }
@@ -125,15 +119,15 @@ main(int argc, char **argv)
 
     if (LoadSecurityDll(SSP_BASIC, NTLM_PACKAGE_NAME) == NULL) {
         fprintf(stderr, "FATAL: can't initialize SSPI, exiting.\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     debug("SSPI initialized OK\n");
 
     atexit(UnloadSecurityDll);
 
     /* initialize FDescs */
-    setbuf(stdout, NULL);
-    setbuf(stderr, NULL);
+    setbuf(stdout, nullptr);
+    setbuf(stderr, nullptr);
 
     while (fgets(wstr, HELPER_INPUT_BUFFER, stdin) != NULL) {
 
@@ -177,6 +171,6 @@ main(int argc, char **argv)
         err = 0;
         fflush(stdout);
     }
-    return 0;
+    return EXIT_SUCCESS;
 }
 

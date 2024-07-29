@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef _SQUID_FORMAT_FORMAT_H
-#define _SQUID_FORMAT_FORMAT_H
+#ifndef SQUID_SRC_FORMAT_FORMAT_H
+#define SQUID_SRC_FORMAT_FORMAT_H
 
 #include "base/RefCount.h"
 #include "ConfigParser.h"
@@ -44,7 +44,7 @@ public:
     Format(const char *name);
     virtual ~Format();
 
-    /* very inefficent parser, but who cares, this needs to be simple */
+    /* very inefficient parser, but who cares, this needs to be simple */
     /* First off, let's tokenize, we'll optimize in a second pass.
      * A token can either be a %-prefixed sequence (usually a dynamic
      * token but it can be an escaped sequence), or a string. */
@@ -61,7 +61,13 @@ public:
     Format *next;
 };
 
+/// Compiles a single logformat %code expression into the given buffer.
+/// Ignores any input characters after the expression.
+/// \param start  where the logformat expression begins
+/// \return the length of the parsed %code expression
+size_t AssembleOne(const char *start, MemBuf &buf, const AccessLogEntryPointer &ale);
+
 } // namespace Format
 
-#endif /* _SQUID_FORMAT_FORMAT_H */
+#endif /* SQUID_SRC_FORMAT_FORMAT_H */
 

@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef _SQUID_COMM_READ_H
-#define _SQUID_COMM_READ_H
+#ifndef SQUID_SRC_COMM_READ_H
+#define SQUID_SRC_COMM_READ_H
 
 #include "base/AsyncCall.h"
 #include "comm/forward.h"
@@ -50,16 +50,18 @@ void ReadCancel(int fd, AsyncCall::Pointer &callback);
 /// callback handler to process an FD which is available for reading
 extern PF HandleRead;
 
+/// maximum read delay for readers with limited lifetime
+time_t MortalReadTimeout(const time_t startTime, const time_t lifetimeLimit);
 } // namespace Comm
 
 // Legacy API to be removed
 void comm_read_base(const Comm::ConnectionPointer &conn, char *buf, int len, AsyncCall::Pointer &callback);
 inline void comm_read(const Comm::ConnectionPointer &conn, char *buf, int len, AsyncCall::Pointer &callback)
 {
-    assert(buf != NULL);
+    assert(buf != nullptr);
     comm_read_base(conn, buf, len, callback);
 }
 void comm_read_cancel(int fd, IOCB *callback, void *data);
 
-#endif /* _SQUID_COMM_READ_H */
+#endif /* SQUID_SRC_COMM_READ_H */
 

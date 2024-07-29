@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -12,7 +12,7 @@
 
 #include <iostream>
 
-bool
+static bool
 CaseSensitiveCheck()
 {
     Trie aTrie;
@@ -47,12 +47,12 @@ CaseSensitiveCheck()
         return 1;
     }
 
-    if (aTrie.findPrefix("User-AgentFoo" , 13) != (void *)1) {
+    if (aTrie.findPrefix("User-AgentFoo", 13) != (void *)1) {
         std::cerr << "Could not find User prefix" << std::endl;
         return 1;
     }
 
-    if (aTrie.findPrefix("user-agentFoo" , 13) == (void *)1) {
+    if (aTrie.findPrefix("user-agentFoo", 13) == (void *)1) {
         std::cerr << "found user prefix" << std::endl;
         return 1;
     }
@@ -60,7 +60,7 @@ CaseSensitiveCheck()
     return 0;
 }
 
-bool
+static bool
 CaseInsensitiveCheck()
 {
     Trie aTrie(new TrieCaseless);
@@ -95,12 +95,12 @@ CaseInsensitiveCheck()
         return 1;
     }
 
-    if (aTrie.findPrefix("User-AgentFoo" , 13) != (void *)1) {
+    if (aTrie.findPrefix("User-AgentFoo", 13) != (void *)1) {
         std::cerr << "Could not find User prefix" << std::endl;
         return 1;
     }
 
-    if (aTrie.findPrefix("user-agentFoo" , 13) != (void *)1) {
+    if (aTrie.findPrefix("user-agentFoo", 13) != (void *)1) {
         std::cerr << "Could not find user prefix" << std::endl;
         return 1;
     }
@@ -108,7 +108,7 @@ CaseInsensitiveCheck()
     return 0;
 }
 
-int main (int argc, char **argv)
+int main (int, char **)
 {
     if (CaseSensitiveCheck()) {
         std::cerr << "Case sensitive check failure." << std::endl;

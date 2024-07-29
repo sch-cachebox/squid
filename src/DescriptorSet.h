@@ -1,22 +1,20 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_DESCRIPTOR_SET_H
-#define SQUID_DESCRIPTOR_SET_H
+#ifndef SQUID_SRC_DESCRIPTORSET_H
+#define SQUID_SRC_DESCRIPTORSET_H
 
 #include <iosfwd>
 
-/** \ingroup Comm
-
-    \todo: Should we use std::set<int> with its flexibility? Our implementation
+/* TODO: Should we use std::set<int> with its flexibility? Our implementation
     has constant overhead, which is smaller than log(n) of std::set.
-
-an unordered collection of unique descriptors with O(1) add/del/has ops */
+*/
+/// An unordered collection of unique descriptors with O(1) add/del/has ops
 class DescriptorSet
 {
 public:
@@ -65,5 +63,5 @@ operator <<(std::ostream &os, const DescriptorSet &ds)
     return os;
 }
 
-#endif /* SQUID_DESCRIPTOR_SET_H */
+#endif /* SQUID_SRC_DESCRIPTORSET_H */
 

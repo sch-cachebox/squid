@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -20,7 +20,6 @@
 #include "mgr/Registration.h"
 #include "SquidConfig.h"
 #include "SquidMath.h"
-#include "SquidTime.h"
 #include "StatCounters.h"
 #include "Store.h"
 #include "tools.h"
@@ -29,7 +28,7 @@
 #include "snmp_core.h"
 #endif
 
-static hash_table *client_table = NULL;
+static hash_table *client_table = nullptr;
 
 static ClientInfo *clientdbAdd(const Ip::Address &addr);
 static FREE clientdbFreeItem;
@@ -53,45 +52,36 @@ static int cleanup_removed;
 #endif
 
 ClientInfo::ClientInfo(const Ip::Address &ip) :
+#if USE_DELAY_POOLS
+    BandwidthBucket(0, 0, 0),
+#endif
     addr(ip),
     n_established(0),
     last_seen(0)
 #if USE_DELAY_POOLS
-    , writeSpeedLimit(0),
-    prevTime(0),
-    bucketSize(0),
-    bucketSizeLimit(0),
-    writeLimitingActive(false),
+    , writeLimitingActive(false),
     firstTimeConnection(true),
     quotaQueue(nullptr),
     rationedQuota(0),
     rationedCount(0),
-    selectWaiting(false),
     eventWaiting(false)
 #endif
 {
     debugs(77, 9, "ClientInfo constructed, this=" << static_cast<void*>(this));
-
-#if USE_DELAY_POOLS
-    getCurrentTime();
-    /* put current time to have something sensible here */
-    prevTime = current_dtime;
-#endif
-
     char *buf = static_cast<char*>(xmalloc(MAX_IPSTRLEN)); // becomes hash.key
-    hash.key = addr.toStr(buf,MAX_IPSTRLEN);
+    key = addr.toStr(buf,MAX_IPSTRLEN);
 }
 
 static ClientInfo *
 clientdbAdd(const Ip::Address &addr)
 {
     ClientInfo *c = new ClientInfo(addr);
-    hash_join(client_table, &c->hash);
+    hash_join(client_table, static_cast<hash_link*>(c));
     ++statCounter.client_http.clients;
 
     if ((statCounter.client_http.clients > max_clients) && !cleanup_running && cleanup_scheduled < 2) {
         ++cleanup_scheduled;
-        eventAdd("client_db garbage collector", clientdbScheduledGC, NULL, 90, 0);
+        eventAdd("client_db garbage collector", clientdbScheduledGC, nullptr, 90, 0);
     }
 
     return c;
@@ -110,9 +100,9 @@ class ClientDbRr: public RegisteredRunner
 {
 public:
     /* RegisteredRunner API */
-    virtual void useConfig();
+    void useConfig() override;
 };
-RunnerRegistrationEntry(ClientDbRr);
+DefineRunnerRegistrator(ClientDbRr);
 
 void
 ClientDbRr::useConfig()
@@ -132,14 +122,14 @@ ClientInfo * clientdbGetInfo(const Ip::Address &addr)
     ClientInfo *c;
 
     if (!Config.onoff.client_db)
-        return NULL;
+        return nullptr;
 
     addr.toStr(key,MAX_IPSTRLEN);
 
     c = (ClientInfo *) hash_lookup(client_table, key);
-    if (c==NULL) {
+    if (c==nullptr) {
         debugs(77, DBG_IMPORTANT,"Client db does not contain information for given IP address "<<(const char*)key);
-        return NULL;
+        return nullptr;
     }
     return c;
 }
@@ -157,10 +147,10 @@ clientdbUpdate(const Ip::Address &addr, const LogTags &ltype, AnyP::ProtocolType
 
     c = (ClientInfo *) hash_lookup(client_table, key);
 
-    if (c == NULL)
+    if (c == nullptr)
         c = clientdbAdd(addr);
 
-    if (c == NULL)
+    if (c == nullptr)
         debug_trap("clientdbUpdate: Failed to add entry");
 
     if (p == AnyP::PROTO_HTTP) {
@@ -201,11 +191,11 @@ clientdbEstablished(const Ip::Address &addr, int delta)
 
     c = (ClientInfo *) hash_lookup(client_table, key);
 
-    if (c == NULL) {
+    if (c == nullptr) {
         c = clientdbAdd(addr);
     }
 
-    if (c == NULL)
+    if (c == nullptr)
         debug_trap("clientdbUpdate: Failed to add entry");
 
     c->n_established += delta;
@@ -231,7 +221,7 @@ clientdbCutoffDenied(const Ip::Address &addr)
 
     c = (ClientInfo *) hash_lookup(client_table, key);
 
-    if (c == NULL)
+    if (c == nullptr)
         return 0;
 
     /*
@@ -277,7 +267,6 @@ void
 clientdbDump(StoreEntry * sentry)
 {
     const char *name;
-    ClientInfo *c;
     int icp_total = 0;
     int icp_hits = 0;
     int http_total = 0;
@@ -285,8 +274,9 @@ clientdbDump(StoreEntry * sentry)
     storeAppendPrintf(sentry, "Cache Clients:\n");
     hash_first(client_table);
 
-    while ((c = (ClientInfo *) hash_next(client_table))) {
-        storeAppendPrintf(sentry, "Address: %s\n", hashKeyStr(&c->hash));
+    while (hash_link *hash = hash_next(client_table)) {
+        const ClientInfo *c = static_cast<const ClientInfo *>(hash);
+        storeAppendPrintf(sentry, "Address: %s\n", hashKeyStr(hash));
         if ( (name = fqdncache_gethostbyaddr(c->addr, 0)) ) {
             storeAppendPrintf(sentry, "Name:    %s\n", name);
         }
@@ -344,24 +334,16 @@ clientdbFreeItem(void *data)
 
 ClientInfo::~ClientInfo()
 {
-    safe_free(hash.key);
+    safe_free(key);
 
 #if USE_DELAY_POOLS
     if (CommQuotaQueue *q = quotaQueue) {
-        q->clientInfo = NULL;
+        q->clientInfo = nullptr;
         delete q; // invalidates cbdata, cancelling any pending kicks
     }
 #endif
 
     debugs(77, 9, "ClientInfo destructed, this=" << static_cast<void*>(this));
-}
-
-void
-clientdbFreeMemory(void)
-{
-    hashFreeItems(client_table, clientdbFreeItem);
-    hashFreeMemory(client_table);
-    client_table = NULL;
 }
 
 static void
@@ -379,7 +361,7 @@ clientdbGC(void *)
 
     link_next = hash_get_bucket(client_table, bucket++);
 
-    while (link_next != NULL) {
+    while (link_next != nullptr) {
         ClientInfo *c = (ClientInfo *)link_next;
         int age = squid_curtime - c->last_seen;
         link_next = link_next->next;
@@ -399,7 +381,7 @@ clientdbGC(void *)
         if (age < 60)
             continue;
 
-        hash_remove_link(client_table, &c->hash);
+        hash_remove_link(client_table, static_cast<hash_link*>(c));
 
         clientdbFreeItem(c);
 
@@ -409,7 +391,7 @@ clientdbGC(void *)
     }
 
     if (bucket < CLIENT_DB_HASH_SIZE)
-        eventAdd("client_db garbage collector", clientdbGC, NULL, 0.15, 0);
+        eventAdd("client_db garbage collector", clientdbGC, nullptr, 0.15, 0);
     else {
         bucket = 0;
         cleanup_running = 0;
@@ -417,7 +399,7 @@ clientdbGC(void *)
 
         if (!cleanup_scheduled) {
             cleanup_scheduled = 1;
-            eventAdd("client_db garbage collector", clientdbScheduledGC, NULL, 6 * 3600, 0);
+            eventAdd("client_db garbage collector", clientdbScheduledGC, nullptr, 6 * 3600, 0);
         }
 
         debugs(49, 2, "clientdbGC: Removed " << cleanup_removed << " entries");
@@ -430,7 +412,7 @@ clientdbStartGC(void)
     max_clients = statCounter.client_http.clients;
     cleanup_running = 1;
     cleanup_removed = 0;
-    clientdbGC(NULL);
+    clientdbGC(nullptr);
 }
 
 #if SQUID_SNMP
@@ -438,62 +420,54 @@ clientdbStartGC(void)
 Ip::Address *
 client_entry(Ip::Address *current)
 {
-    ClientInfo *c = NULL;
     char key[MAX_IPSTRLEN];
+    hash_first(client_table);
 
     if (current) {
         current->toStr(key,MAX_IPSTRLEN);
-        hash_first(client_table);
-        while ((c = (ClientInfo *) hash_next(client_table))) {
-            if (!strcmp(key, hashKeyStr(&c->hash)))
+        while (hash_link *hash = hash_next(client_table)) {
+            if (!strcmp(key, hashKeyStr(hash)))
                 break;
         }
-
-        c = (ClientInfo *) hash_next(client_table);
-    } else {
-        hash_first(client_table);
-        c = (ClientInfo *) hash_next(client_table);
     }
+
+    ClientInfo *c = static_cast<ClientInfo *>(hash_next(client_table));
 
     hash_last(client_table);
 
-    if (c)
-        return (&c->addr);
-    else
-        return (NULL);
-
+    return c ? &c->addr : nullptr;
 }
 
 variable_list *
 snmp_meshCtblFn(variable_list * Var, snint * ErrP)
 {
     char key[MAX_IPSTRLEN];
-    ClientInfo *c = NULL;
+    ClientInfo *c = nullptr;
     Ip::Address keyIp;
 
     *ErrP = SNMP_ERR_NOERROR;
     MemBuf tmp;
-    debugs(49, 6, HERE << "Current : length=" << Var->name_length << ": " << snmpDebugOid(Var->name, Var->name_length, tmp));
+    debugs(49, 6, "Current : length=" << Var->name_length << ": " << snmpDebugOid(Var->name, Var->name_length, tmp));
     if (Var->name_length == 16) {
         oid2addr(&(Var->name[12]), keyIp, 4);
     } else if (Var->name_length == 28) {
         oid2addr(&(Var->name[12]), keyIp, 16);
     } else {
         *ErrP = SNMP_ERR_NOSUCHNAME;
-        return NULL;
+        return nullptr;
     }
 
     keyIp.toStr(key, sizeof(key));
-    debugs(49, 5, HERE << "[" << key << "] requested!");
+    debugs(49, 5, "[" << key << "] requested!");
     c = (ClientInfo *) hash_lookup(client_table, key);
 
-    if (c == NULL) {
-        debugs(49, 5, HERE << "not found.");
+    if (c == nullptr) {
+        debugs(49, 5, "not found.");
         *ErrP = SNMP_ERR_NOSUCHNAME;
-        return NULL;
+        return nullptr;
     }
 
-    variable_list *Answer = NULL;
+    variable_list *Answer = nullptr;
     int aggr = 0;
 
     switch (Var->name[LEN_SQ_NET + 2]) {

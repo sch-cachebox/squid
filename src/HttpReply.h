@@ -1,17 +1,16 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef SQUID_HTTPREPLY_H
-#define SQUID_HTTPREPLY_H
+#ifndef SQUID_SRC_HTTPREPLY_H
+#define SQUID_SRC_HTTPREPLY_H
 
 #include "http/StatusLine.h"
 #include "HttpBody.h"
-#include "HttpMsg.h"
 #include "HttpRequest.h"
 
 void httpReplyInitModule(void);
@@ -22,7 +21,7 @@ class HttpHdrContRange;
 
 class HttpHdrSc;
 
-class HttpReply: public HttpMsg
+class HttpReply: public Http::Message
 {
     MEMPROXY_CLASS(HttpReply);
 
@@ -30,16 +29,12 @@ public:
     typedef RefCount<HttpReply> Pointer;
 
     HttpReply();
-    ~HttpReply();
+    ~HttpReply() override;
 
-    virtual void reset();
+    void reset() override;
 
-    /**
-     \retval true on success
-     \retval false and sets *error to zero when needs more data
-     \retval false and sets *error to a positive Http::StatusCode on error
-     */
-    virtual bool sanityCheckStartLine(const char *buf, const size_t hdr_len, Http::StatusCode *error);
+    /* Http::Message API */
+    bool sanityCheckStartLine(const char *buf, const size_t hdr_len, Http::StatusCode *error) override;
 
     /** \par public, readable; never update these or their .hdr equivalents directly */
     time_t date;
@@ -67,13 +62,15 @@ public:
     bool do_clean;
 
 public:
-    virtual int httpMsgParseError();
+    int httpMsgParseError() override;
 
-    virtual bool expectingBody(const HttpRequestMethod&, int64_t&) const;
+    bool expectingBody(const HttpRequestMethod&, int64_t&) const override;
 
-    virtual bool inheritProperties(const HttpMsg *aMsg);
+    bool inheritProperties(const Http::Message *) override;
 
-    bool updateOnNotModified(HttpReply const *other);
+    /// \returns nil (if no updates are necessary)
+    /// \returns a new reply combining this reply with 304 updates (otherwise)
+    Pointer recreateOnNotModified(const HttpReply &reply304) const;
 
     /** set commonly used info with one call */
     void setHeaders(Http::StatusCode status,
@@ -82,8 +79,11 @@ public:
     /** \return a ready to use mem buffer with a packed reply */
     MemBuf *pack() const;
 
+    /// construct and return an HTTP/200 (Connection Established) response
+    static HttpReplyPointer MakeConnectionEstablished();
+
     /** construct a 304 reply and return it */
-    HttpReply *make304() const;
+    HttpReplyPointer make304() const;
 
     void redirect(Http::StatusCode, const char *);
 
@@ -108,18 +108,33 @@ public:
     void packHeadersUsingSlowPacker(Packable &p) const;
 
     /** Clone this reply.
-     *  Could be done as a copy-contructor but we do not want to accidently copy a HttpReply..
+     *  Could be done as a copy-contructor but we do not want to accidentally copy a HttpReply..
      */
-    HttpReply *clone() const;
+    HttpReply *clone() const override;
 
-    /// Remove Warnings with warn-date different from Date value
-    void removeStaleWarnings();
-
-    virtual void hdrCacheInit();
+    void hdrCacheInit() override;
 
     /// whether our Date header value is smaller than theirs
     /// \returns false if any information is missing
     bool olderThan(const HttpReply *them) const;
+
+    /// Some response status codes prohibit sending Content-Length (RFC 7230 section 3.3.2).
+    void removeIrrelevantContentLength();
+
+    void configureContentLengthInterpreter(Http::ContentLengthInterpreter &) override;
+    /// parses reply header using Parser
+    bool parseHeader(Http1::Parser &hp);
+
+    /// Parses response status line and headers at the start of the given
+    /// NUL-terminated buffer of the given size. Respects reply_header_max_size.
+    /// Assures pstate becomes Http::Message::psParsed on (and only on) success.
+    /// \returns the number of bytes in a successfully parsed prefix (or zero)
+    /// \retval 0 implies that more data is needed to parse the response prefix
+    size_t parseTerminatedPrefix(const char *, size_t);
+
+    /// approximate size of a "status-line CRLF headers CRLF" sequence
+    /// \sa HttpRequest::prefixLen()
+    size_t prefixLen() const;
 
 private:
     /** initialize */
@@ -143,17 +158,15 @@ private:
      */
     void calcMaxBodySize(HttpRequest& request) const;
 
-    String removeStaleWarningValues(const String &value);
-
     mutable int64_t bodySizeMax; /**< cached result of calcMaxBodySize */
 
     HttpHdrContRange *content_range; ///< parsed Content-Range; nil for non-206 responses!
 
 protected:
-    virtual void packFirstLineInto(Packable * p, bool) const { sline.packInto(p); }
+    void packFirstLineInto(Packable * p, bool) const override { sline.packInto(p); }
 
-    virtual bool parseFirstLine(const char *start, const char *end);
+    bool parseFirstLine(const char *start, const char *end) override;
 };
 
-#endif /* SQUID_HTTPREPLY_H */
+#endif /* SQUID_SRC_HTTPREPLY_H */
 

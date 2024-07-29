@@ -1,15 +1,16 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef STATCOUNTERS_H_
-#define STATCOUNTERS_H_
+#ifndef SQUID_SRC_STATCOUNTERS_H
+#define SQUID_SRC_STATCOUNTERS_H
 
 #include "base/ByteCounter.h"
+#include "comm/Incoming.h"
 #include "StatHist.h"
 
 #if USE_CACHE_DIGESTS
@@ -21,7 +22,7 @@ public:
     int falseHits = 0;
     int trueMisses = 0;
     int falseMisses = 0;
-    int closeHits = 0;     /// \todo: temporary remove it later
+    int closeHits = 0;     // TODO: temporary. remove it later
 };
 #endif
 
@@ -59,7 +60,7 @@ public:
             int errors = 0;
             ByteCounter kbytes_in;
             ByteCounter kbytes_out;
-        } all , http, ftp, other;
+        } all, http, ftp, other;
     } server;
 
     struct {
@@ -121,9 +122,11 @@ public:
     double cputime = 0.0;
 
     struct timeval timestamp;
-    StatHist comm_udp_incoming;
-    StatHist comm_dns_incoming;
-    StatHist comm_tcp_incoming;
+#if USE_POLL || USE_SELECT
+    Comm::Incoming comm_dns;
+    Comm::Incoming comm_tcp;
+    Comm::Incoming comm_udp;
+#endif
     StatHist select_fds_hist;
 
     struct {
@@ -156,9 +159,18 @@ public:
         int outs = 0;
         int ins = 0;
     } swap;
+
+    struct {
+        uint64_t attempts = 0;
+        uint64_t refusalsDueToLocking = 0;
+        uint64_t refusalsDueToZeroSize = 0;
+        uint64_t refusalsDueToTimeLimit = 0;
+        uint64_t failures = 0;
+    } hitValidation;
+
 };
 
 extern StatCounters statCounter;
 
-#endif /* STATCOUNTERS_H_ */
+#endif /* SQUID_SRC_STATCOUNTERS_H */
 

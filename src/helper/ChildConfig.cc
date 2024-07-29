@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
@@ -9,10 +9,11 @@
 #include "squid.h"
 #include "cache_cf.h"
 #include "ConfigParser.h"
-#include "Debug.h"
+#include "debug/Stream.h"
 #include "globals.h"
 #include "helper/ChildConfig.h"
 #include "Parsing.h"
+#include "sbuf/SBuf.h"
 
 #include <cstring>
 
@@ -73,8 +74,10 @@ Helper::ChildConfig::parseConfig()
 {
     char const *token = ConfigParser::NextToken();
 
-    if (!token)
+    if (!token) {
         self_destruct();
+        return;
+    }
 
     /* starts with a bare number for the max... back-compatible */
     n_max = xatoui(token);
@@ -82,6 +85,7 @@ Helper::ChildConfig::parseConfig()
     if (n_max < 1) {
         debugs(0, DBG_CRITICAL, "ERROR: The maximum number of processes cannot be less than 1.");
         self_destruct();
+        return;
     }
 
     /* Parse extension options */
@@ -91,7 +95,7 @@ Helper::ChildConfig::parseConfig()
         } else if (strncmp(token, "idle=", 5) == 0) {
             n_idle = xatoui(token + 5);
             if (n_idle < 1) {
-                debugs(0, DBG_CRITICAL, "WARNING OVERRIDE: Using idle=0 for helpers causes request failures. Overriding to use idle=1 instead.");
+                debugs(0, DBG_CRITICAL, "WARNING: OVERRIDE: Using idle=0 for helpers causes request failures. Overriding to use idle=1 instead.");
                 n_idle = 1;
             }
         } else if (strncmp(token, "concurrency=", 12) == 0) {
@@ -108,22 +112,26 @@ Helper::ChildConfig::parseConfig()
             else {
                 debugs(0, DBG_CRITICAL, "ERROR: Unsupported on-persistent-overloaded action: " << action);
                 self_destruct();
+                return;
             }
-        } else {
+        } else if (strncmp(token, "reservation-timeout=", 20) == 0)
+            reservationTimeout = xatoui(token + 20);
+        else {
             debugs(0, DBG_PARSE_NOTE(DBG_IMPORTANT), "ERROR: Undefined option: " << token << ".");
             self_destruct();
+            return;
         }
     }
 
     /* simple sanity. */
 
     if (n_startup > n_max) {
-        debugs(0, DBG_CRITICAL, "WARNING OVERRIDE: Capping startup=" << n_startup << " to the defined maximum (" << n_max <<")");
+        debugs(0, DBG_CRITICAL, "WARNING: OVERRIDE: Capping startup=" << n_startup << " to the defined maximum (" << n_max <<")");
         n_startup = n_max;
     }
 
     if (n_idle > n_max) {
-        debugs(0, DBG_CRITICAL, "WARNING OVERRIDE: Capping idle=" << n_idle << " to the defined maximum (" << n_max <<")");
+        debugs(0, DBG_CRITICAL, "WARNING: OVERRIDE: Capping idle=" << n_idle << " to the defined maximum (" << n_max <<")");
         n_idle = n_max;
     }
 

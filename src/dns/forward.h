@@ -1,19 +1,19 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef _SQUID_SRC_DNS_FORWARD_H
-#define _SQUID_SRC_DNS_FORWARD_H
+#ifndef SQUID_SRC_DNS_FORWARD_H
+#define SQUID_SRC_DNS_FORWARD_H
 
 #include "ip/forward.h"
 
 class rfc1035_rr;
 
-typedef void IDNSCB(void *, const rfc1035_rr *, int, const char *);
+typedef void IDNSCB(void *cbdata, const rfc1035_rr *answer, const int recordsInAnswer, const char *error, bool lastAnswer);
 
 /// generic DNS API
 namespace Dns
@@ -29,5 +29,5 @@ void Init(void);
 void idnsALookup(const char *, IDNSCB *, void *);
 void idnsPTRLookup(const Ip::Address &, IDNSCB *, void *);
 
-#endif /* _SQUID_SRC_DNS_FORWARD_H */
+#endif /* SQUID_SRC_DNS_FORWARD_H */
 

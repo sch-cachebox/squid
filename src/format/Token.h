@@ -1,15 +1,16 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-#ifndef _SQUID_FORMAT_TOKEN_H
-#define _SQUID_FORMAT_TOKEN_H
+#ifndef SQUID_SRC_FORMAT_TOKEN_H
+#define SQUID_SRC_FORMAT_TOKEN_H
 
 #include "format/ByteCode.h"
+#include "proxyp/Elements.h"
 
 /*
  * Squid configuration allows users to define custom formats in
@@ -50,12 +51,17 @@ public:
     const char *label;
     struct {
         char *string;
+        // TODO: Add ID caching for protocols other than PROXY protocol.
+        /// the cached ID of the parsed header or zero
+        ProxyProtocol::Two::FieldType headerId;
 
         struct {
             char *header;
             char *element;
             char separator;
         } header;
+
+        uint8_t byteValue; // %byte{} parameter or zero
     } data;
     int widthMin; ///< minimum field width
     int widthMax; ///< maximum field width
@@ -64,7 +70,7 @@ public:
     bool space;
     bool zero;
     int divisor;    // class invariant: MUST NOT be zero.
-    Token *next;    /* todo: move from linked list to array */
+    Token *next;    // TODO: move from linked list to array
 
 private:
     const char *scanForToken(TokenTableEntry const table[], const char *cur);
@@ -72,5 +78,5 @@ private:
 
 } // namespace Format
 
-#endif /* _SQUID_FORMAT_TOKEN_H */
+#endif /* SQUID_SRC_FORMAT_TOKEN_H */
 

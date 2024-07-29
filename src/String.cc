@@ -1,38 +1,25 @@
 /*
- * Copyright (C) 1996-2021 The Squid Software Foundation and contributors
+ * Copyright (C) 1996-2023 The Squid Software Foundation and contributors
  *
  * Squid software is distributed under GPLv2+ license and includes
  * contributions from numerous individuals and organizations.
  * Please see the COPYING and CONTRIBUTORS files for details.
  */
 
-/* DEBUG: section 67    String */
-
 #include "squid.h"
-#include "base/TextException.h"
-#include "mgr/Registration.h"
-#include "profiler/Profiler.h"
-#include "Store.h"
+#include "mem/forward.h"
+#include "SquidString.h"
 
 #include <climits>
-
-int
-String::psize() const
-{
-    Must(size() < INT_MAX);
-    return size();
-}
 
 // low-level buffer allocation,
 // does not free old buffer and does not adjust or look at len_
 void
 String::allocBuffer(String::size_type sz)
 {
-    PROF_start(StringInitBuf);
     assert (undefined());
-    char *newBuffer = (char*)memAllocString(sz, &sz);
+    auto *newBuffer = static_cast<char*>(memAllocBuf(sz, &sz));
     setBuffer(newBuffer, sz);
-    PROF_stop(StringInitBuf);
 }
 
 // low-level buffer assignment
@@ -46,14 +33,10 @@ String::setBuffer(char *aBuf, String::size_type aSize)
     size_ = aSize;
 }
 
-String::String(char const *aString) : size_(0), len_(0), buf_(NULL)
+String::String(char const *aString)
 {
     if (aString)
         allocAndFill(aString, strlen(aString));
-#if DEBUGSTRINGS
-
-    StringRegistry::Instance().add(this);
-#endif
 }
 
 String &
@@ -92,7 +75,7 @@ String::operator !=(String const &that) const
 
 // public interface, makes sure that we clean the old buffer first
 void
-String::limitInit(const char *str, int len)
+String::assign(const char *str, int len)
 {
     clean(); // TODO: optimize to avoid cleaning the buffer we can use
     allocAndFill(str, len);
@@ -103,59 +86,44 @@ String::limitInit(const char *str, int len)
 void
 String::allocAndFill(const char *str, int len)
 {
-    PROF_start(StringAllocAndFill);
     assert(str);
     allocBuffer(len + 1);
     len_ = len;
     memcpy(buf_, str, len);
     buf_[len] = '\0';
-    PROF_stop(StringAllocAndFill);
 }
 
-String::String(String const &old) : size_(0), len_(0), buf_(NULL)
+String::String(String const &old) : size_(0), len_(0), buf_(nullptr)
 {
     if (old.size() > 0)
         allocAndFill(old.rawBuf(), old.size());
-#if DEBUGSTRINGS
-
-    StringRegistry::Instance().add(this);
-#endif
 }
 
 void
 String::clean()
 {
-    PROF_start(StringClean);
-
     /* TODO if mempools has already closed this will FAIL!! */
     if (defined())
-        memFreeString(size_, buf_);
+        memFreeBuf(size_, buf_);
 
     len_ = 0;
 
     size_ = 0;
 
-    buf_ = NULL;
-    PROF_stop(StringClean);
+    buf_ = nullptr;
 }
 
 String::~String()
 {
     clean();
-#if DEBUGSTRINGS
-
-    StringRegistry::Instance().remove(this);
-#endif
 }
 
 void
 String::reset(char const *str)
 {
-    PROF_start(StringReset);
     clean(); // TODO: optimize to avoid cleaning the buffer if we can reuse it
     if (str)
         allocAndFill(str, strlen(str));
-    PROF_stop(StringReset);
 }
 
 void
@@ -163,7 +131,6 @@ String::append( char const *str, int len)
 {
     assert(str && len >= 0);
 
-    PROF_start(StringAppend);
     if (len_ + len + 1 /*'\0'*/ < size_) {
         xstrncpy(buf_+len_, str, len+1);
         len_ += len;
@@ -184,7 +151,6 @@ String::append( char const *str, int len)
 
         absorb(snew);
     }
-    PROF_stop(StringAppend);
 }
 
 void
@@ -216,7 +182,7 @@ String::absorb(String &old)
     setBuffer(old.buf_, old.size_);
     len_ = old.len_;
     old.size_ = 0;
-    old.buf_ = NULL;
+    old.buf_ = nullptr;
     old.len_ = 0;
 }
 
@@ -229,75 +195,98 @@ String::substr(String::size_type from, String::size_type to) const
     Must(to > from);
 
     String rv;
-    rv.limitInit(rawBuf()+from,to-from);
+    rv.assign(rawBuf()+from, to-from);
     return rv;
 }
 
-#if DEBUGSTRINGS
 void
-String::stat(StoreEntry *entry) const
+String::cut(String::size_type newLength)
 {
-    storeAppendPrintf(entry, "%p : %d/%d \"%.*s\"\n",this,len_, size_, size(), rawBuf());
+    // size_type is size_t, unsigned. No need to check for newLength <0
+    if (newLength > len_) return;
+
+    len_ = newLength;
+
+    // buf_ may be nullptr on zero-length strings.
+    if (len_ == 0 && !buf_)
+        return;
+
+    buf_[newLength] = '\0';
 }
 
-StringRegistry &
-StringRegistry::Instance()
+/// compare NULL and empty strings because str*cmp() may fail on NULL strings
+/// and because we need to return consistent results for strncmp(count == 0).
+static bool
+nilCmp(const bool thisIsNilOrEmpty, const bool otherIsNilOrEmpty, int &result)
 {
-    return Instance_;
+    if (!thisIsNilOrEmpty && !otherIsNilOrEmpty)
+        return false; // result does not matter
+
+    if (thisIsNilOrEmpty && otherIsNilOrEmpty)
+        result = 0;
+    else if (thisIsNilOrEmpty)
+        result = -1;
+    else // otherIsNilOrEmpty
+        result = +1;
+
+    return true;
 }
 
-template <class C>
 int
-ptrcmp(C const &lhs, C const &rhs)
+String::cmp(char const *aString) const
 {
-    return lhs - rhs;
+    int result = 0;
+    if (nilCmp(!size(), (!aString || !*aString), result))
+        return result;
+
+    return strcmp(termedBuf(), aString);
 }
 
-StringRegistry::StringRegistry()
+int
+String::cmp(char const *aString, String::size_type count) const
 {
-#if DEBUGSTRINGS
-    Mgr::RegisterAction("strings",
-                        "Strings in use in squid", Stat, 0, 1);
-#endif
+    int result = 0;
+    if (nilCmp((!size() || !count), (!aString || !*aString || !count), result))
+        return result;
+
+    return strncmp(termedBuf(), aString, count);
 }
 
-void
-StringRegistry::add(String const *entry)
+int
+String::cmp(String const &aString) const
 {
-    entries.insert(entry, ptrcmp);
+    int result = 0;
+    if (nilCmp(!size(), !aString.size(), result))
+        return result;
+
+    return strcmp(termedBuf(), aString.termedBuf());
 }
 
-void
-StringRegistry::remove(String const *entry)
+int
+String::caseCmp(char const *aString) const
 {
-    entries.remove(entry, ptrcmp);
+    int result = 0;
+    if (nilCmp(!size(), (!aString || !*aString), result))
+        return result;
+
+    return strcasecmp(termedBuf(), aString);
 }
 
-StringRegistry StringRegistry::Instance_;
-
-String::size_type memStringCount();
-
-void
-StringRegistry::Stat(StoreEntry *entry)
+int
+String::caseCmp(char const *aString, String::size_type count) const
 {
-    storeAppendPrintf(entry, "%lu entries, %lu reported from MemPool\n", (unsigned long) Instance().entries.elements, (unsigned long) memStringCount());
-    Instance().entries.head->walk(Stater, entry);
-}
+    int result = 0;
+    if (nilCmp((!size() || !count), (!aString || !*aString || !count), result))
+        return result;
 
-void
-StringRegistry::Stater(String const * const & nodedata, void *state)
-{
-    StoreEntry *entry = (StoreEntry *) state;
-    nodedata->stat(entry);
+    return strncasecmp(termedBuf(), aString, count);
 }
-
-#endif
 
 /* TODO: move onto String */
 int
 stringHasWhitespace(const char *s)
 {
-    return strpbrk(s, w_space) != NULL;
+    return strpbrk(s, w_space) != nullptr;
 }
 
 /* TODO: move onto String */
@@ -324,7 +313,7 @@ stringHasCntl(const char *s)
 char *
 strwordtok(char *buf, char **t)
 {
-    unsigned char *word = NULL;
+    unsigned char *word = nullptr;
     unsigned char *p = (unsigned char *) buf;
     unsigned char *d;
     unsigned char ch;
@@ -416,7 +405,7 @@ const char *
 String::pos(char const *aString) const
 {
     if (undefined())
-        return NULL;
+        return nullptr;
     return strstr(termedBuf(), aString);
 }
 
@@ -424,7 +413,7 @@ const char *
 String::pos(char const ch) const
 {
     if (undefined())
-        return NULL;
+        return nullptr;
     return strchr(termedBuf(), ch);
 }
 
@@ -432,7 +421,7 @@ const char *
 String::rpos(char const ch) const
 {
     if (undefined())
-        return NULL;
+        return nullptr;
     return strrchr(termedBuf(), (ch));
 }
 
@@ -441,7 +430,7 @@ String::find(char const ch) const
 {
     const char *c;
     c=pos(ch);
-    if (c==NULL)
+    if (c==nullptr)
         return npos;
     return c-rawBuf();
 }
@@ -451,7 +440,7 @@ String::find(char const *aString) const
 {
     const char *c;
     c=pos(aString);
-    if (c==NULL)
+    if (c==nullptr)
         return npos;
     return c-rawBuf();
 }
@@ -461,12 +450,8 @@ String::rfind(char const ch) const
 {
     const char *c;
     c=rpos(ch);
-    if (c==NULL)
+    if (c==nullptr)
         return npos;
     return c-rawBuf();
 }
-
-#if !_USE_INLINE_
-#include "String.cci"
-#endif
 
